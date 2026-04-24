@@ -1,0 +1,73 @@
+{
+  "config": {
+    "chainId": 32382,
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "arrowGlacierBlock": 0,
+    "grayGlacierBlock": 0,
+    "mergeNetsplitBlock": 0,
+    "shanghaiTime": 0,
+    "cancunTime": 0,
+    "pragueTime": 0,
+    "depositContractAddress": "0x00000000219ab540356cbb839cbe05303d7705fa",
+    "withdrawalRequestContractAddress": "0x00000961ef480eb55e80d19ad83579a64c007002",
+    "consolidationRequestContractAddress": "0x0000bbddc7ce488642fb579f8b00f3a590007251",
+    "terminalTotalDifficulty": 0,
+    "terminalTotalDifficultyPassed": true,
+    "ethash": {}
+  },
+  "nonce": "0x0",
+  "timestamp": "0x0",
+  "extraData": "0x",
+  "gasLimit": "0x1C9C380",
+  "difficulty": "0x0",
+  "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "alloc": {
+    "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266": {
+      "balance": "0xd3c21bcecceda1000000"
+    },
+    "0x000F3df6D732807Ef1319fB7B8bB8522d0Beac02": {
+      "comment": "EIP-4788 beacon block root contract (required for Cancun)",
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500"
+    },
+    "0x00000961ef480eb55e80d19ad83579a64c007002": {
+      "comment": "EIP-7002 withdrawal request contract (required for Prague)",
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x5f5ff3"
+    },
+    "0x0000bbddc7ce488642fb579f8b00f3a590007251": {
+      "comment": "EIP-7251 consolidation request contract (required for Prague)",
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x5f5ff3"
+    },
+    "0x00000000219ab540356cbb839cbe05303d7705fa": {
+      "comment": "EIP-6110 deposit contract (required for Prague, scanned for logs)",
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x00"
+    },
+    "0x0000f90827f1c53a10cb7a02335b175320002935": {
+      "comment": "Prague system contract (PraguePreExecutionProcessor)",
+      "balance": "0x0",
+      "nonce": "0x1",
+      "code": "0x5f5ff3"
+    }
+  },
+  "baseFeePerGas": "0x7",
+  "number": "0x0",
+  "gasUsed": "0x0",
+  "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+}

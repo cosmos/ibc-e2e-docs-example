@@ -1,0 +1,42 @@
+# cosmos/ibc-relayer configuration — EXAMPLE
+#
+# setup.sh generates ibc/local/config.yml automatically at runtime.
+# cosmos/ibc-relayer looks for config at <config_dir>/local/config.yml
+# where config_dir defaults to ./config (mounted as ./ibc:/config in compose).
+#
+# Reference: https://github.com/cosmos/ibc-relayer
+
+# SP1 proving mode: "mock" for local devnet (no ZK proofs),
+# "network" to use the Succinct prover network on public chains.
+sp1_prover: "mock"
+
+relayer_api:
+  address: "0.0.0.0:3000"
+
+signing:
+  keys_path: "/relayer/cosmos-keys"
+
+cosmos:
+  chain_id:        "cosmos-1"
+  rpc_url:         "http://gaia:26657"
+  grpc_url:        "grpc://gaia:9090"
+  key_name:        "relayer"          # key in the relayer keyring
+  keyring_backend: "test"
+  home:            "/relayer/cosmos-keys"
+  gas_adjustment:  1.5
+  # SHA-256 checksum of the 08-wasm Ethereum LC binary stored on-chain.
+  # Returned by `wfchaind query ibc-wasm checksums`.
+  wasm_checksum:   "<hex checksum from store-code tx>"
+
+ethereum:
+  chain_id:    32382
+  rpc_url:     "http://besu:8545"
+  beacon_url:  "http://teku:5051"
+  # Ethereum private key used to sign transactions (pre-funded in el-genesis.json)
+  private_key: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+
+contracts:
+  # Deployed by `forge script` in setup.sh Phase 4A.
+  # Shown in `./setup.sh status` or read from ibc/state.env.
+  ics26_router:         "0x<ICS26Router address>"
+  ics20_transfer:       "0x<ICS20Transfer address>"

@@ -1,0 +1,29 @@
+# Besu execution-layer configuration for IBC devnet
+genesis-file         = "/evm/el-genesis.json"
+data-path            = "/data"
+
+# Networking — single-node devnet, no peers needed
+p2p-enabled          = false
+host-allowlist       = ["*"]
+
+# JSON-RPC HTTP (port 8545)
+rpc-http-enabled     = true
+rpc-http-host        = "0.0.0.0"
+rpc-http-port        = 8545
+rpc-http-cors-origins = ["*"]
+rpc-http-api         = ["ETH","NET","WEB3","TXPOOL","DEBUG","ADMIN"]
+
+# JSON-RPC WebSocket (port 8546)
+rpc-ws-enabled       = true
+rpc-ws-host          = "0.0.0.0"
+rpc-ws-port          = 8546
+rpc-ws-api           = ["ETH","NET","WEB3","TXPOOL"]
+
+# Engine API for Teku CL (port 8551, internal only)
+engine-rpc-enabled       = true
+engine-host-allowlist    = ["*"]
+engine-rpc-port          = 8551
+engine-jwt-secret        = "/evm/jwt.hex"
+
+# Sync
+sync-mode            = "FULL"

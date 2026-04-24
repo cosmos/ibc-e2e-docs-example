@@ -1,0 +1,187 @@
+# IBC Demo: Cosmos (wfchain) ↔ Ethereum (Besu EL + Teku CL)
+#
+# Chain A — Cosmos:  single PoA validator, standard Cosmos SDK IBC
+# Chain B — Ethereum: single PoA validator
+#   • Besu  = execution layer (EVM, JSON-RPC, Engine API)
+#   • Teku  = consensus layer (beacon node + embedded validator client)
+
+services:
+
+  # ── Chain A: Cosmos (wfchain, 1 PoA validator) ───────────────────────────
+  cosmos:
+    image: ${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}
+    user: root
+    container_name: cosmos
+    command: [ "start", "--home=/data" ]
+    ports:
+      - "26657:26657" # CometBFT RPC
+      - "9090:9090" # gRPC
+      - "1317:1317" # REST API
+      - "26656:26656" # P2P
+    volumes:
+      - cosmos-data:/data
+      - ./cosmos:/cosmos-config:ro
+    networks:
+      - ibc-net
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD", "wfchaind", "status", "--home=/data" ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+
+  # ── Chain B / EL: Besu (execution layer) ─────────────────────────────────
+  besu:
+    image: ${BESU_IMAGE:-hyperledger/besu:26.2.0}
+    container_name: besu
+    command: [ "--config-file=/evm/besu.toml" ]
+    ports:
+      - "8545:8545" # EVM JSON-RPC
+      - "8546:8546" # EVM WebSocket
+    volumes:
+      - besu-data:/data
+      - ./evm:/evm:ro
+    networks:
+      - ibc-net
+    restart: on-failure
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/localhost/8545"
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  # ── Chain B / CL: Teku (consensus layer + embedded validator client) ──────
+  teku:
+    image: ${TEKU_IMAGE:-consensys/teku:26.4}
+    user: root
+    container_name: teku
+    command: [ "--config-file=/evm/teku.yaml" ]
+    ports:
+      - "5051:5051" # Beacon REST API
+    volumes:
+      - teku-data:/data
+      - ./evm:/evm:ro
+    networks:
+      - ibc-net
+    depends_on:
+      besu:
+        condition: service_healthy
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:5051/eth/v1/node/syncing | grep -q 'is_syncing'" ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+
+  # ── Relayer database ─────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: ibc-postgres
+    environment:
+      POSTGRES_USER: relayer
+      POSTGRES_PASSWORD: relayer
+      POSTGRES_DB: relayer
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ibc-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U relayer" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ── IBC Operator / Relayer ────────────────────────────────────────────────
+  relayer:
+    image: ${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}
+    container_name: ibc-relayer
+    command: [ "start" ]
+    environment:
+      POSTGRES_USER: relayer
+      POSTGRES_PASSWORD: relayer
+    volumes:
+      - ./ibc:/home/nonroot/config:ro
+      - relayer-data:/relayer
+    networks:
+      - ibc-net
+    # relayer uses ibcv2_proof_api (proof-api gRPC) + postgres + cosmos + besu.
+    # proof-api transitively pulls in attestor, so packet delivery is usable
+    # as soon as the relayer's depends_on resolve.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+      teku:
+        condition: service_healthy
+      proof-api:
+        condition: service_started
+    restart: on-failure
+
+  # ── IBC Attestor ──────────────────────────────────────────────────────────
+  # Watches both chains for IBC events and produces attestations that the
+  # relayer uses to advance the light client state on each counterparty.
+  attestor:
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    container_name: ibc-attestor
+    command: [ "server", "--config", "/config/attestor-config.toml", "--chain-type", "evm", "--signer-type", "local" ]
+    volumes:
+      - ./ibc/local:/config:ro
+      - attestor-data:/data
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+      teku:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── SP1 Proof API ─────────────────────────────────────────────────────────
+  # Generates SP1 ZK proofs (or mock proofs when SP1_PROVER=mock) for the
+  # 08-wasm Ethereum light client on the Cosmos chain.  The relayer connects
+  # to this service over gRPC to fetch proofs before submitting UpdateClient.
+  proof-api:
+    image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}
+    container_name: ibc-proof-api
+    environment:
+      SP1_PROGRAM_VERSIONS: ${SP1_PROGRAMS_TAG:-v1.2.0}
+      SP1_PROVER: mock
+    volumes:
+      - ./ibc/local/relayer.json:/usr/local/relayer/relayer.json:ro
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+      teku:
+        condition: service_healthy
+      attestor:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  cosmos-data:
+  besu-data:
+  teku-data:
+  relayer-data:
+  attestor-data:
+  postgres-data:
+
+
+networks:
+  ibc-net:
+    driver: bridge

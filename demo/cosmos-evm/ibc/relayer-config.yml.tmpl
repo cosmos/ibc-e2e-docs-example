@@ -1,0 +1,56 @@
+# cosmos/ibc-relayer configuration — rendered from templates/relayer-config.yml.tmpl
+# Variables: PROOF_API_GRPC_ADDR, COSMOS_CHAIN_ID, COSMOS_BECH32_PREFIX, COSMOS_DENOM,
+#            COSMOS_CP_BLOCK, ETH_CHAIN_ID, ICS26_ROUTER_ADDR, ICS20_TRANSFER_ADDR,
+#            BESU_CP_BLOCK.
+# COSMOS_CP_BLOCK / BESU_CP_BLOCK are multi-line YAML fragments; the template
+# supplies only the leading indent on the first line.
+
+postgres:
+  hostname: postgres
+  port: "5432"
+  database: relayer
+
+signing:
+  keys_path: "/home/nonroot/config/local/keys.json"
+
+relayer_api:
+  address: "0.0.0.0:3000"
+
+metrics:
+  prometheus_address: "0.0.0.0:9100"
+
+ibcv2_proof_api:
+  grpc_address: "${PROOF_API_GRPC_ADDR}"
+  grpc_tls_enabled: false
+
+chains:
+  cosmos:
+    chain_name: cosmos
+    chain_id: "${COSMOS_CHAIN_ID}"
+    type: cosmos
+    environment: testnet
+    cosmos:
+      rpc: "http://cosmos:26657"
+      grpc: "cosmos:9090"
+      address_prefix: "${COSMOS_BECH32_PREFIX}"
+      ibcv2_tx_fee_denom: "${COSMOS_DENOM}"
+      ibcv2_tx_fee_amount: ${RELAYER_TX_FEE_AMOUNT}
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      ${COSMOS_CP_BLOCK}
+
+  besu:
+    chain_name: besu
+    chain_id: "${ETH_CHAIN_ID}"
+    type: evm
+    environment: testnet
+    evm:
+      rpc: "http://besu:8545"
+      contracts:
+        ics_26_router_address: "${ICS26_ROUTER_ADDR}"
+        ics_20_transfer_address: "${ICS20_TRANSFER_ADDR}"
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      ${BESU_CP_BLOCK}
