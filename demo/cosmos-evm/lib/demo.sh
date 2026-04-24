@@ -107,7 +107,7 @@ evm_erc20_approve() {
 
 # Poll a Cosmos bank balance until it differs from the baseline.
 wait_for_cosmos_relay() {
-  local addr="$1" denom="$2" before="$3" max="${4:-90}" step="${5:-5}"
+  local addr="$1" denom="$2" before="$3" max="${4:-150}" step="${5:-5}"
   log "  ── Waiting for relay (up to ${max}s) ────────────────────────────────"
   local start elapsed=0
   start=$(date +%s)
@@ -192,8 +192,8 @@ demo_cosmos_to_evm_transfer() {
   submit_to_relayer "$COSMOS_TO_EVM_TX_HASH" "$COSMOS_CHAIN_ID"
 
   # Cosmos balance changes first (packet commit), then EVM balance (relay delivery).
-  log "  ── Waiting for relay (up to 90s) ────────────────────────────────────"
-  local start elapsed=0 step=5 max=90 c_committed=0 relayed=0
+  log "  ── Waiting for relay (up to 120s) ────────────────────────────────────"
+  local start elapsed=0 step=5 max=120 c_committed=0 relayed=0
   start=$(date +%s)
   while (( elapsed < max )); do
     sleep "$step"; (( elapsed += step ))

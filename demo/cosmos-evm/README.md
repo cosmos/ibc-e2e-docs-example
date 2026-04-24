@@ -11,65 +11,90 @@ attestation-based light clients secure EVM→Cosmos.
 
 ## Architecture
 
+Split across three views: services/containers, Cosmos-side on-chain, EVM-side
+on-chain. Skip to the one you need.
+
+### 1. Services (Docker Compose)
+
+The seven long-running containers, their host ports, and which services must be
+healthy before each starts (`depends_on`).
+
 ```mermaid
-graph TB
-    subgraph Cosmos["Cosmos Chain (cosmos:26657)"]
-        CosmosNode["wfchaind\nCometBFT + SDK"]
-        AttLC["attestations-N\nAttestation Light Client\n(08-wasm)"]
-        CosmosNode --> AttLC
+graph LR
+    cosmos[["cosmos<br/>:26657 RPC<br/>:1317 REST<br/>:9090 gRPC"]]
+    besu[["besu<br/>:8545 JSON-RPC<br/>:8546 WS<br/>:8551 Engine (int.)"]]
+    teku[["teku<br/>:5051 Beacon REST"]]
+    postgres[["postgres<br/>:5432 (int.)"]]
+    attestor[["attestor<br/>:9101/9102 (int.)"]]
+    proofapi[["proof-api<br/>:9090 gRPC (int.)"]]
+    relayer[["relayer<br/>:3000 API (int.)<br/>:9100 metrics (int.)"]]
+
+    teku -->|depends_on<br/>service_healthy| besu
+    attestor -->|depends_on<br/>service_healthy| besu
+    attestor --> cosmos
+    attestor --> teku
+    proofapi -->|depends_on<br/>service_healthy| besu
+    proofapi --> cosmos
+    proofapi --> teku
+    proofapi -->|depends_on<br/>service_started| attestor
+    relayer -->|depends_on<br/>service_healthy| postgres
+    relayer --> cosmos
+    relayer --> besu
+    relayer -->|depends_on<br/>service_started| proofapi
+```
+
+### 2. Cosmos-side modules
+
+What's inside `wfchaind`, and how IFT packets route out. The attestation light
+client tracks EVM state; the IFT module mints/burns a tokenfactory denom and
+hands packets to GMP.
+
+```mermaid
+graph LR
+    subgraph Cosmos["wfchaind modules"]
+        Bank["bank<br/>(uift supply)"]
+        TF["tokenfactory<br/>create-denom / mint / burn"]
+        IFT["ift<br/>register-bridge / transfer<br/>(authority = validator)"]
+        GMP["27-gmp<br/>port 'gmpport'<br/>module acct: wf1e7l5l…"]
+        IBC["ibc<br/>packet router"]
+        AttLC["attestations-N<br/>08-wasm (Ethereum LC)"]
     end
 
-    subgraph EVM["Ethereum Devnet"]
-        subgraph Execution["Besu EL (besu:8545)"]
-            ICS26["ICS26Router\n(UUPS proxy)"]
-            ICS27GMP["ICS27GMP\nport 'gmpport'"]
-            TestIFT["TestIFT (ERC20)\nIFTBase.iftMint/iftTransfer"]
-            CtorEVM["CosmosIFTSendCallConstructor\n(encodes MsgIFTMint for cosmostx)"]
-            SP1LC["SP1ICS07Tendermint\nCosmos Light Client"]
-            ICS26 --> ICS27GMP
-            ICS26 --> SP1LC
-            ICS27GMP --> TestIFT
-            TestIFT --> CtorEVM
-        end
-        subgraph Consensus["Teku CL (teku:5051)"]
-            Beacon["Beacon Node\nFinality + Headers"]
-        end
-        Execution <-->|"Engine API\n(JWT)"| Consensus
+    User(["user"]) -->|tx ift transfer| IFT
+    IFT -->|burns uift from sender| Bank
+    IFT -->|MsgSendCall| GMP
+    TF -.->|creates & admins| Bank
+    GMP --> IBC
+    IBC -->|outbound packet| Relayer(("relayer"))
+    IBC -->|verifies inbound proofs| AttLC
+```
+
+### 3. EVM-side contracts
+
+On Besu, `ICS26Router` is the IBC hub; it routes `"gmpport"` to `ICS27GMP`
+and verifies Cosmos inbound state via `SP1ICS07Tendermint`. `TestIFT` is the
+ERC20 that mints/burns; `CosmosIFTSendCallConstructor` builds the `cosmostx`
+payload for EVM→Cosmos.
+
+```mermaid
+graph LR
+    User(["user"]) -->|cast send iftTransfer| TestIFT
+    Relayer(("relayer")) -->|recvPacket + SP1 proof| ICS26
+
+    subgraph EVM["Solidity contracts on Besu"]
+        ICS26["ICS26Router<br/>ERC1967 proxy"]
+        SP1LC["SP1ICS07Tendermint<br/>client-N, verifies Cosmos state"]
+        ICS27["ICS27GMP<br/>port 'gmpport'<br/>+ ICS27Account (CREATE2)"]
+        TestIFT["TestIFT (ERC20 proxy)<br/>iftTransfer / iftMint"]
+        Ctor["CosmosIFTSendCallConstructor<br/>encodes cosmostx MsgIFTMint<br/>(baked with ICA + denom)"]
     end
 
-    subgraph Relayer["IBC Relayer (relayer:3000)"]
-        RelayerSvc["ibc-relayer v0.0.2\nGo relayer service"]
-        DB[("PostgreSQL\npacket state")]
-        RelayerSvc --- DB
-    end
-
-    subgraph ProofAPI["Proof API (proof-api:9090)"]
-        ProofSvc["SP1 Proof Service\n(Rust/gRPC)"]
-        C2E["cosmos_to_eth\nmodule"]
-        E2C["eth_to_cosmos\nmodule"]
-        ProofSvc --> C2E
-        ProofSvc --> E2C
-    end
-
-    subgraph Attestor["Attestor (attestor:9101)"]
-        AttSvc["ibc-attestor\nEthereum state signer"]
-    end
-
-    %% Relayer connections
-    RelayerSvc -->|"CometBFT RPC\ntcp://cosmos:26657"| CosmosNode
-    RelayerSvc -->|"JSON-RPC\nhttp://besu:8545"| Execution
-    RelayerSvc -->|"gRPC\nproof-api:9090"| ProofSvc
-
-    %% Proof API connections
-    C2E -->|"CometBFT RPC"| CosmosNode
-    C2E -->|"JSON-RPC"| Execution
-    E2C -->|"JSON-RPC"| Execution
-    E2C -->|"Beacon REST\nteku:5051"| Beacon
-    E2C -->|"HTTP\nattesor:9101"| AttSvc
-
-    %% Attestor connections
-    AttSvc -->|"JSON-RPC"| Execution
-    AttSvc -->|"Beacon REST"| Beacon
+    ICS26 -->|verifyMembership| SP1LC
+    ICS26 -->|addIBCApp 'gmpport'| ICS27
+    ICS27 -->|functionCall via ICS27Account| TestIFT
+    TestIFT -->|sendCall via| ICS27
+    TestIFT -.->|uses for payload| Ctor
+    TestIFT --> ERC20[("balances mapping")]
 ```
 
 ---

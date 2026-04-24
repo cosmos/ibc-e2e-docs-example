@@ -363,7 +363,16 @@ generate_relayer_config() {
   export COSMOS_CP_BLOCK BESU_CP_BLOCK
   render_template "$IBC_DIR/relayer-config.yml.tmpl" "$IBC_DIR/local/config.yml"
 
-  render_template "$IBC_DIR/state.env.tmpl" "$IBC_STATE_FILE"
+  # Only render state.env on the INITIAL call (Phase 4D, when it's freshly
+  # truncated at the start of setup_ibc). finalize_relayer_config (Phase 4F4)
+  # calls this function again to re-render config.yml with known client IDs —
+  # but re-rendering state.env at that point would wipe everything appended
+  # by the intervening phases (COSMOS_WASM_CLIENT_ID, COSMOS_IFT_DENOM,
+  # IFT_ICA_ADDRESS, IFT_CTOR_ADDR, COSMOS_IFT_MODULE_ADDR, …), which broke
+  # later `./setup.sh demo …` invocations that source state.env.
+  if [[ ! -s "$IBC_STATE_FILE" ]]; then
+    render_template "$IBC_DIR/state.env.tmpl" "$IBC_STATE_FILE"
+  fi
   log "Relayer config written"
 }
 
