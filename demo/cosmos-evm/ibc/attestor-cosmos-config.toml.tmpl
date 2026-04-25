@@ -1,0 +1,14 @@
+# ibc-attestor (Cosmos watcher) — rendered from ibc/attestor-cosmos-config.toml.tmpl
+# Cosmos adapter is simpler than EVM: only the CometBFT RPC URL is required
+# (no router_address, no finality_offset). See cosmos/ibc-attestor
+# apps/ibc-attestor/src/adapter/cosmos.rs.
+
+[server]
+listen_addr = "0.0.0.0:9101"
+health_addr = "0.0.0.0:9102"
+
+[adapter]
+url = "http://cosmos:26657"
+
+[signer]
+keystore_path = "/config/.ibc-attestor/ibc-attestor-keystore"
