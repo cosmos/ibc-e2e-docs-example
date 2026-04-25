@@ -21,7 +21,7 @@
 # Environment (optional):
 #   SOLIDITY_IBC_DIR       — local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
 #   ETHEREUM_LC_WASM_PATH  — path to ethereum-lc.wasm; otherwise extracted from tarball
-#   ICS26_ROUTER_ADDR / ICS20_TRANSFER_ADDR — skip forge deploy
+#   ICS26_ROUTER_ADDR — skip forge deploy
 #   EVM_ATTESTATION_LC_ADDR — skip AttestationLightClient deploy
 #   WASM_CHECKSUM          — skip wasm fetch
 #
@@ -90,12 +90,11 @@ DEVNET_MNEMONIC="${DEVNET_MNEMONIC:-plastic ozone child tennis endless permit so
 SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-}"
 # Default to main: the latest tagged release (solidity-v2.0.1) predates
 # ICS27GMP.sol, which is required for IFT end-to-end (IFT routes packets
-# through GMP on port "gmpport"; v2.0.1 only wires ICS20 on port "transfer").
+# through GMP on port "gmpport";
 # Pin to a specific tag once main stabilises an ICS27-aware release.
 SOLIDITY_IBC_TAG="${SOLIDITY_IBC_TAG:-main}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/E2ETestDeploy.s.sol}"
 ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
-ICS20_TRANSFER_ADDR="${ICS20_TRANSFER_ADDR:-}"
 # AttestationLightClient on EVM — replaces SP1ICS07Tendermint. Deployed by
 # create_evm_ibc_client; pre-set to skip that phase if you already have one
 # wired up to ICS26Router.

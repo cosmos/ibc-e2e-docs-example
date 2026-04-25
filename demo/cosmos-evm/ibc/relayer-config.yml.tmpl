@@ -1,10 +1,8 @@
 # cosmos/ibc-relayer configuration — rendered from templates/relayer-config.yml.tmpl
 # Variables: PROOF_API_GRPC_ADDR, COSMOS_CHAIN_ID, COSMOS_BECH32_PREFIX, COSMOS_DENOM,
-#            COSMOS_CP_BLOCK, ETH_CHAIN_ID, ICS26_ROUTER_ADDR, ICS20_TRANSFER_ADDR,
-#            BESU_CP_BLOCK.
+#            COSMOS_CP_BLOCK, ETH_CHAIN_ID, ICS26_ROUTER_ADDR, BESU_CP_BLOCK.
 # COSMOS_CP_BLOCK / BESU_CP_BLOCK are multi-line YAML fragments; the template
 # supplies only the leading indent on the first line.
-
 postgres:
   hostname: postgres
   port: "5432"
@@ -49,7 +47,7 @@ chains:
       rpc: "http://besu:8545"
       contracts:
         ics_26_router_address: "${ICS26_ROUTER_ADDR}"
-        ics_20_transfer_address: "${ICS20_TRANSFER_ADDR}"
+        ics_20_transfer_address: "0x0000000000000000000000000000000000000000"
     supported_bridges:
       - ibcv2
     ibcv2:

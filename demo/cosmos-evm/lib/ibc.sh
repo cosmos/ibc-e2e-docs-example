@@ -2,7 +2,7 @@
 # Phase 4: IBC setup (source fetch, forge deploy, client create, relayer wiring).
 
 fetch_solidity_ibc() {
-  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$ICS20_TRANSFER_ADDR" && -n "$EVM_ATTESTATION_LC_ADDR" ]]; then
+  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$EVM_ATTESTATION_LC_ADDR" ]]; then
     log "IBC contracts already provided — skipping source fetch"
     return 0
   fi
@@ -71,7 +71,7 @@ _forge_broadcast_addr() {
 
 # Preferred: look up a contract address by label in E2ETestDeploy's returned
 # JSON (`.returns."0".value` is a JSON-encoded string mapping labels like
-# "ics26Router", "ics20Transfer", "ics27Gmp", "ift", "erc20" to addresses).
+# "ics26Router", "ics27Gmp", "ift", "erc20" to addresses).
 # Robust against reordering or new proxies being added.
 #
 # Forge double-escapes the returned string: after jq reads the outer file it
@@ -88,20 +88,19 @@ _forge_return_addr() {
 }
 
 deploy_ibc_contracts() {
-  # Skip the ~60s forge deploy if ICS26Router + ICS20Transfer addresses are
-  # already known AND the router actually has bytecode at that address on the
-  # live chain. The bytecode check catches the case where state.env survived
-  # but Besu's volume was wiped (addresses point to empty accounts).
-  # AttestationLightClient is NOT gated on here: E2ETestDeploy doesn't produce
-  # it (it's deployed later in create_evm_ibc_client via cast --create).
-  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$ICS20_TRANSFER_ADDR" ]]; then
+  # Skip the ~60s forge deploy if ICS26Router is already known AND the router
+  # actually has bytecode at that address on the live chain. The bytecode
+  # check catches the case where state.env survived but Besu's volume was
+  # wiped (addresses point to empty accounts). AttestationLightClient is NOT
+  # gated on here: E2ETestDeploy doesn't produce it (it's deployed later in
+  # create_evm_ibc_client via cast --create).
+  if [[ -n "$ICS26_ROUTER_ADDR" ]]; then
     local router_code
     router_code=$(cast_in_net code "$ICS26_ROUTER_ADDR" \
       --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || router_code=""
     if [[ "$router_code" != "" && "$router_code" != "0x" ]]; then
       log "IBC contracts already deployed — skipping forge script"
       log "  ICS26Router        : $ICS26_ROUTER_ADDR"
-      log "  ICS20Transfer      : $ICS20_TRANSFER_ADDR"
       log "  ICS27GMP           : ${ICS27_GMP_ADDR:-<not set>}"
       return 0
     fi
@@ -146,15 +145,12 @@ deploy_ibc_contracts() {
 
   local s; s=$(basename "$DEPLOY_SCRIPT")
   ICS26_ROUTER_ADDR=$(_forge_return_addr "$s" ics26Router)
-  ICS20_TRANSFER_ADDR=$(_forge_return_addr "$s" ics20Transfer)
   ICS27_GMP_ADDR=$(_forge_return_addr "$s" ics27Gmp)
 
-  [[ -n "$ICS26_ROUTER_ADDR"  ]] || die "ics26Router not in E2ETestDeploy returns — check forge broadcast"
-  [[ -n "$ICS20_TRANSFER_ADDR" ]] || die "ics20Transfer not in E2ETestDeploy returns"
+  [[ -n "$ICS26_ROUTER_ADDR" ]] || die "ics26Router not in E2ETestDeploy returns — check forge broadcast"
 
   log "Contracts deployed:"
   log "  ICS26Router (proxy)   : $ICS26_ROUTER_ADDR"
-  log "  ICS20Transfer (proxy) : $ICS20_TRANSFER_ADDR"
   log "  ICS27GMP (proxy)      : ${ICS27_GMP_ADDR:-<not present — using old tag without ICS27?>}"
 
   # Persist for `./setup.sh demo …` re-runs (they source state.env and need
@@ -163,7 +159,6 @@ deploy_ibc_contracts() {
   mkdir -p "$IBC_DIR"
   {
     echo "ICS26_ROUTER_ADDR=$ICS26_ROUTER_ADDR"
-    echo "ICS20_TRANSFER_ADDR=$ICS20_TRANSFER_ADDR"
     [[ -n "${ICS27_GMP_ADDR:-}" ]] && echo "ICS27_GMP_ADDR=$ICS27_GMP_ADDR"
   } >> "$IBC_STATE_FILE"
 }
@@ -997,7 +992,7 @@ setup_ibc() {
   info " IBC Setup Complete"
   info "════════════════════════════════════════════════════════"
   info " ICS26Router          : $ICS26_ROUTER_ADDR"
-  info " ICS20Transfer        : $ICS20_TRANSFER_ADDR"
+  info " ICS27GMP             : ${ICS27_GMP_ADDR:-<not deployed>}"
   info " AttestationLightClient (EVM-side Cosmos LC) : ${EVM_ATTESTATION_LC_ADDR:-<not found>}"
   info " IFT ERC20            : ${IFT_CONTRACT_ADDR:-<not deployed>}"
   info " Cosmos IFT denom     : ${COSMOS_IFT_DENOM:-<not set>}"

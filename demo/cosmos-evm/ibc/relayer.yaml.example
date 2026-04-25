@@ -39,4 +39,3 @@ contracts:
   # Deployed by `forge script` in setup.sh Phase 4A.
   # Shown in `./setup.sh status` or read from ibc/state.env.
   ics26_router:         "0x<ICS26Router address>"
-  ics20_transfer:       "0x<ICS20Transfer address>"

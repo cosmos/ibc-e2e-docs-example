@@ -82,21 +82,14 @@ submit_to_relayer() {
   return 1
 }
 
-# Resolve the IBC ERC20 contract for a denom path. Echoes empty on failure/zero.
-# In IFT-only mode the only path we expect is ".../<COSMOS_IFT_DENOM>", which
-# resolves to the TestIFT proxy. The ICS20Transfer lookup remains as a
-# catch-all for diagnostic purposes but shouldn't fire in the IFT demo.
+# Resolve the IBC ERC20 contract for a denom path. Echoes empty if the denom
+# isn't IFT — this demo is IFT-only, so any other path is unexpected.
 resolve_ibc_erc20_addr() {
   local path="$1"
   if [[ -n "${COSMOS_IFT_DENOM:-}" && -n "${IFT_CONTRACT_ADDR:-}" && \
         "$path" == */"$COSMOS_IFT_DENOM" ]]; then
-    echo "$IFT_CONTRACT_ADDR"; return
+    echo "$IFT_CONTRACT_ADDR"
   fi
-  local addr
-  addr=$(cast_in_net call "$ICS20_TRANSFER_ADDR" "ibcERC20Contract(string)(address)" "$path" \
-    --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || addr=""
-  [[ "$addr" == "0x0000000000000000000000000000000000000000" ]] && addr=""
-  echo "$addr"
 }
 
 evm_erc20_approve() {
