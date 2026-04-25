@@ -9,13 +9,12 @@
         "tm_rpc_url": "http://cosmos:26657",
         "ics26_address": "${ICS26_ROUTER_ADDR}",
         "eth_rpc_url": "http://besu:8545",
-        "mode": {"sp1": {
-          "sp1_prover": {"type": "env"},
-          "sp1_programs": {
-            "update_client":                "${SP1_PROGRAMS_DIR}/sp1-ics07-tendermint-update-client",
-            "membership":                   "${SP1_PROGRAMS_DIR}/sp1-ics07-tendermint-membership",
-            "update_client_and_membership": "${SP1_PROGRAMS_DIR}/sp1-ics07-tendermint-uc-and-membership",
-            "misbehaviour":                 "${SP1_PROGRAMS_DIR}/sp1-ics07-tendermint-misbehaviour"
+        "signer_address": "${RELAYER_ADDR}",
+        "mode": {"attested": {
+          "attestor": {
+            "quorum_threshold": 1,
+            "attestor_endpoints": ["http://attestor-cosmos:9101"],
+            "attestor_query_timeout_ms": 10000
           }
         }}
       }

@@ -2,7 +2,7 @@
 # Phase 4: IBC setup (source fetch, forge deploy, client create, relayer wiring).
 
 fetch_solidity_ibc() {
-  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$ICS20_TRANSFER_ADDR" && -n "$SP1_ICS07_ADDR" ]]; then
+  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$ICS20_TRANSFER_ADDR" && -n "$EVM_ATTESTATION_LC_ADDR" ]]; then
     log "IBC contracts already provided — skipping source fetch"
     return 0
   fi
@@ -71,8 +71,8 @@ _forge_broadcast_addr() {
 
 # Preferred: look up a contract address by label in E2ETestDeploy's returned
 # JSON (`.returns."0".value` is a JSON-encoded string mapping labels like
-# "ics26Router", "ics20Transfer", "ics27Gmp", "ift", "erc20", "verifierMock"
-# to addresses). Robust against reordering or new proxies being added.
+# "ics26Router", "ics20Transfer", "ics27Gmp", "ift", "erc20" to addresses).
+# Robust against reordering or new proxies being added.
 #
 # Forge double-escapes the returned string: after jq reads the outer file it
 # still contains literal `\"` sequences inside. We strip backslashes with
@@ -92,8 +92,8 @@ deploy_ibc_contracts() {
   # already known AND the router actually has bytecode at that address on the
   # live chain. The bytecode check catches the case where state.env survived
   # but Besu's volume was wiped (addresses point to empty accounts).
-  # SP1ICS07Tendermint is NOT gated on here: E2ETestDeploy doesn't produce it
-  # (it's deployed later in create_evm_ibc_client via proof-api CreateClient).
+  # AttestationLightClient is NOT gated on here: E2ETestDeploy doesn't produce
+  # it (it's deployed later in create_evm_ibc_client via cast --create).
   if [[ -n "$ICS26_ROUTER_ADDR" && -n "$ICS20_TRANSFER_ADDR" ]]; then
     local router_code
     router_code=$(cast_in_net code "$ICS26_ROUTER_ADDR" \
@@ -148,10 +148,6 @@ deploy_ibc_contracts() {
   ICS26_ROUTER_ADDR=$(_forge_return_addr "$s" ics26Router)
   ICS20_TRANSFER_ADDR=$(_forge_return_addr "$s" ics20Transfer)
   ICS27_GMP_ADDR=$(_forge_return_addr "$s" ics27Gmp)
-  local parsed_sp1
-  parsed_sp1=$(_forge_broadcast_addr "$s" \
-    '[.transactions[] | select(.contractName=="SP1ICS07Tendermint" and .transactionType=="CREATE")] | first | .contractAddress // empty')
-  SP1_ICS07_ADDR="${SP1_ICS07_ADDR:-$parsed_sp1}"
 
   [[ -n "$ICS26_ROUTER_ADDR"  ]] || die "ics26Router not in E2ETestDeploy returns — check forge broadcast"
   [[ -n "$ICS20_TRANSFER_ADDR" ]] || die "ics20Transfer not in E2ETestDeploy returns"
@@ -160,7 +156,16 @@ deploy_ibc_contracts() {
   log "  ICS26Router (proxy)   : $ICS26_ROUTER_ADDR"
   log "  ICS20Transfer (proxy) : $ICS20_TRANSFER_ADDR"
   log "  ICS27GMP (proxy)      : ${ICS27_GMP_ADDR:-<not present — using old tag without ICS27?>}"
-  log "  SP1ICS07Tendermint    : ${SP1_ICS07_ADDR:-<not found in broadcast>}"
+
+  # Persist for `./setup.sh demo …` re-runs (they source state.env and need
+  # these to talk to the EVM router). Each phase appends its own values so
+  # state.env is a pure runtime accumulator — no template render races.
+  mkdir -p "$IBC_DIR"
+  {
+    echo "ICS26_ROUTER_ADDR=$ICS26_ROUTER_ADDR"
+    echo "ICS20_TRANSFER_ADDR=$ICS20_TRANSFER_ADDR"
+    [[ -n "${ICS27_GMP_ADDR:-}" ]] && echo "ICS27_GMP_ADDR=$ICS27_GMP_ADDR"
+  } >> "$IBC_STATE_FILE"
 }
 
 deploy_ift_contracts() {
@@ -194,6 +199,7 @@ store_ethereum_lc() {
     die "ETHEREUM_LC_WASM_PATH must point to an existing file"
   WASM_CHECKSUM=$(openssl dgst -sha256 "$ETHEREUM_LC_WASM_PATH" | awk '{print $NF}')
   log "Ethereum LC wasm checksum: $WASM_CHECKSUM"
+  echo "WASM_CHECKSUM=$WASM_CHECKSUM" >> "$IBC_STATE_FILE"
 }
 
 # Generate the attestor's Web3 v3 JSON keystore (idempotent).
@@ -337,6 +343,7 @@ setup_relayer_key() {
   RELAYER_ADDR=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
     "$COSMOS_BINARY" keys show relayer -a --keyring-backend test --home "$COSMOS_HOME")
   log "Relayer wallet: $RELAYER_ADDR"
+  echo "RELAYER_ADDR=$RELAYER_ADDR" >> "$IBC_STATE_FILE"
 
   # Relayer signs Cosmos txs from /relayer/cosmos-keys; copy the keyring across.
   log "Populating relayer cosmos keyring (relayer-data volume)..."
@@ -377,16 +384,6 @@ generate_relayer_config() {
   export COSMOS_CP_BLOCK BESU_CP_BLOCK
   render_template "$IBC_DIR/relayer-config.yml.tmpl" "$IBC_DIR/local/config.yml"
 
-  # Only render state.env on the INITIAL call (Phase 4D, when it's freshly
-  # truncated at the start of setup_ibc). finalize_relayer_config (Phase 4F4)
-  # calls this function again to re-render config.yml with known client IDs —
-  # but re-rendering state.env at that point would wipe everything appended
-  # by the intervening phases (COSMOS_WASM_CLIENT_ID, COSMOS_IFT_DENOM,
-  # IFT_ICA_ADDRESS, IFT_CTOR_ADDR, COSMOS_IFT_MODULE_ADDR, …), which broke
-  # later `./setup.sh demo …` invocations that source state.env.
-  if [[ ! -s "$IBC_STATE_FILE" ]]; then
-    render_template "$IBC_DIR/state.env.tmpl" "$IBC_STATE_FILE"
-  fi
   log "Relayer config written"
 }
 
@@ -397,14 +394,19 @@ generate_attestor_config() {
                   "$IBC_DIR/local/attestor-config.toml"
 }
 
+generate_attestor_cosmos_config() {
+  log "Generating cosmos-attestor config → ibc/local/attestor-cosmos-config.toml"
+  mkdir -p "$IBC_DIR/local"
+  render_template "$IBC_DIR/attestor-cosmos-config.toml.tmpl" \
+                  "$IBC_DIR/local/attestor-cosmos-config.toml"
+}
+
 generate_proof_api_config() {
   log "Generating proof-api config → ibc/local/relayer.json"
   mkdir -p "$IBC_DIR/local"
-  local sp1_tag="${SP1_PROGRAMS_TAG:-v1.2.0}"
-  SP1_PROGRAMS_DIR="/usr/local/bin/sp1-programs/${sp1_tag}" \
-    render_template "$IBC_DIR/proof-api.json.tmpl" \
-                    "$IBC_DIR/local/relayer.json"
-  log "Proof-api config written (SP1_PROVER=${SP1_PROVER}, tag=$sp1_tag)"
+  render_template "$IBC_DIR/proof-api.json.tmpl" \
+                  "$IBC_DIR/local/relayer.json"
+  log "Proof-api config written (attestation mode, both directions)"
 }
 
 run_db_migrations() {
@@ -431,13 +433,19 @@ run_db_migrations() {
 
 start_relayer()  { log "Starting IBC relayer ($OPERATOR_IMAGE)..."; docker compose up -d relayer; }
 start_attestor() {
-  log "Starting IBC attestor ($ATTESTOR_IMAGE)..."
+  log "Starting IBC attestor — EVM watcher ($ATTESTOR_IMAGE)..."
   generate_attestor_config
   _ensure_attestor_keystore
   docker compose up -d attestor
 }
+start_attestor_cosmos() {
+  log "Starting IBC attestor — Cosmos watcher ($ATTESTOR_IMAGE)..."
+  generate_attestor_cosmos_config
+  _ensure_attestor_keystore
+  docker compose up -d attestor-cosmos
+}
 start_proof_api() {
-  log "Starting proof API ($PROOF_API_IMAGE, prover=$SP1_PROVER)..."
+  log "Starting proof API ($PROOF_API_IMAGE, attestation mode)..."
   generate_proof_api_config
   docker compose up -d proof-api
 }
@@ -448,42 +456,44 @@ create_evm_ibc_client() {
     return 0
   fi
 
-  log "Creating EVM-side Cosmos light client..."
-  local s; s=$(basename "$DEPLOY_SCRIPT")
-  local sp1_mock_verifier
-  sp1_mock_verifier=$(_forge_return_addr "$s" verifierMock)
-  [[ -n "$sp1_mock_verifier" ]] || \
-    die "verifierMock not in E2ETestDeploy returns — run deploy_ibc_contracts first"
-  log "  SP1MockVerifier: $sp1_mock_verifier"
+  log "Creating EVM-side Cosmos light client (AttestationLightClient)..."
 
-  # Fetch SP1ICS07Tendermint init bytecode from proof-api. proof-api's gRPC
-  # server takes a few seconds to bind :9090 after the container starts, so
-  # retry on connection refused for up to ~30s before failing.
-  local response max=30 step=3 elapsed=0
-  log "  Calling proof-api CreateClient (may take a moment for mock proof)..."
-  while true; do
-    response=$(grpc_call \
-      -d "{\"src_chain\":\"$COSMOS_CHAIN_ID\",\"dst_chain\":\"$ETH_CHAIN_ID\",\"parameters\":{\"sp1_verifier\":\"$sp1_mock_verifier\"}}" \
-      proof-api:9090 relayer.RelayerService/CreateClient 2>&1) || true
-    echo "$response" | jq -e '.tx' >/dev/null 2>&1 && break
+  # Attestor address: same key signs for both directions (single keystore is
+  # mounted into attestor + attestor-cosmos). Registering this address with
+  # the EVM AttestationLightClient is what authorises the cosmos-watching
+  # attestor to advance the client; the EVM-watching attestor's signatures
+  # advance the 08-wasm LC on Cosmos via a parallel registration.
+  local attestor_eth_addr
+  attestor_eth_addr="0x$(docker run --rm --user root \
+    -v "$IBC_DIR/local:/home/nonroot" \
+    -e HOME=/home/nonroot "$ATTESTOR_IMAGE" \
+    key show 2>/dev/null | tr -d '[:space:]')"
+  [[ "$attestor_eth_addr" =~ ^0x[0-9a-fA-F]{40}$ ]] || \
+    die "Failed to get valid attestor address (got: $attestor_eth_addr)"
+  log "  Attestor address: $attestor_eth_addr"
 
-    # Only retry on connection errors — real failures (schema mismatch,
-    # bad arguments) should surface immediately.
-    if ! echo "$response" | grep -qE "connection refused|Failed to dial"; then
-      die "proof-api CreateClient failed: $response"
-    fi
-    (( elapsed += step ))
-    (( elapsed >= max )) && die "proof-api CreateClient still unreachable after ${max}s: $response"
-    sleep "$step"; echo -n "."
-  done
+  # Initial trusted height/timestamp = current Cosmos chain head. Future
+  # cosmos states are accepted by AttestationLightClient.updateClient as
+  # long as a quorum of attestors signs StateAttestation{height,timestamp}.
+  local cosmos_status init_height init_time_str init_ts
+  cosmos_status=$(curl -sf http://localhost:26657/status 2>/dev/null) \
+    || die "Cosmos RPC not reachable on :26657"
+  init_height=$(echo "$cosmos_status" | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || echo "")
+  init_time_str=$(echo "$cosmos_status" | jq -r '.result.sync_info.latest_block_time // empty' 2>/dev/null || echo "")
+  [[ "$init_height" =~ ^[0-9]+$ && "$init_height" -gt 0 ]] || die "Bad cosmos height: $init_height"
+  [[ -n "$init_time_str" ]] || die "Empty cosmos block time"
+  # CometBFT timestamps are RFC3339 with nanosecond precision; strip the
+  # fractional + trailing 'Z' before handing to date(1). Try GNU date first,
+  # fall back to BSD date (macOS).
+  local clean_ts="${init_time_str%.*}"
+  clean_ts="${clean_ts%Z}"
+  init_ts=$(date -u -d "$init_time_str" +%s 2>/dev/null \
+            || date -u -j -f "%Y-%m-%dT%H:%M:%S" "$clean_ts" +%s 2>/dev/null \
+            || echo "")
+  [[ "$init_ts" =~ ^[0-9]+$ && "$init_ts" -gt 0 ]] || die "Failed to parse cosmos block time: $init_time_str"
+  log "  Initial trusted state: height=$init_height ts=$init_ts ($init_time_str)"
 
-  local tx_b64 tx_hex
-  tx_b64=$(echo "$response" | jq -r '.tx // empty' 2>/dev/null || echo "")
-  [[ -n "$tx_b64" ]] || die "proof-api CreateClient returned empty tx"
-  tx_hex=$(echo "$tx_b64" | base64 -d | xxd -p -c 9999999 | tr -d '\n')
-  log "  SP1ICS07Tendermint init bytecode: ${#tx_hex} hex chars"
-
-  # Predict client ID from current seq.
+  # Predict client ID from current ICS26Router seq.
   local next_seq
   next_seq=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getNextClientSeq()(uint256)" \
     --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || next_seq=0
@@ -491,21 +501,49 @@ create_evm_ibc_client() {
   local predicted="client-${next_seq}"
   log "  Next client seq: $next_seq → predicted: $predicted"
 
-  # Deploy SP1ICS07Tendermint (CREATE transaction).
-  local deploy_receipt sp1_ics07_addr
+  # Encode constructor args:
+  #   constructor(address[] attestors, uint8 quorum, uint64 initHeight,
+  #               uint64 initTimestamp, address roleManager)
+  # roleManager=address(0) makes the LC permissionless: the onlyProofSubmitter
+  # modifier short-circuits when PROOF_SUBMITTER_ROLE is granted to address(0)
+  # (see contracts/light-clients/attestation/AttestationLightClient.sol:270).
+  # Fine for this devnet; production should pass an admin EOA/multisig.
+  local lc_artifact="$SOLIDITY_IBC_DIR/out/AttestationLightClient.sol/AttestationLightClient.json"
+  [[ -f "$lc_artifact" ]] || die "AttestationLightClient artifact missing: $lc_artifact"
+  local bytecode
+  bytecode=$(jq -r '.bytecode.object' "$lc_artifact")
+  [[ -n "$bytecode" && "$bytecode" != "null" ]] || die "Empty bytecode in $lc_artifact"
+
+  local ctor_args
+  ctor_args=$(cast_in_net abi-encode "constructor(address[],uint8,uint64,uint64,address)" \
+    "[$attestor_eth_addr]" 1 "$init_height" "$init_ts" \
+    "0x0000000000000000000000000000000000000000" 2>/dev/null \
+    | sed 's/^0x//') || ctor_args=""
+  [[ -n "$ctor_args" ]] || die "Failed to abi-encode AttestationLightClient constructor"
+
+  log "  Deploying AttestationLightClient..."
+  local deploy_receipt lc_addr
   deploy_receipt=$(cast_in_net send \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" \
-    --json --create "0x$tx_hex" 2>/dev/null) || deploy_receipt=""
-  sp1_ics07_addr=$(echo "$deploy_receipt" | jq -r '.contractAddress // empty' 2>/dev/null || echo "")
-  [[ -n "$sp1_ics07_addr" && "$sp1_ics07_addr" != "null" ]] || \
-    die "SP1ICS07Tendermint deployment failed"
-  log "  SP1ICS07Tendermint deployed: $sp1_ics07_addr"
+    --json --create "${bytecode}${ctor_args}" 2>/dev/null) || deploy_receipt=""
+  lc_addr=$(echo "$deploy_receipt" | jq -r '.contractAddress // empty' 2>/dev/null || echo "")
+  [[ -n "$lc_addr" && "$lc_addr" != "null" ]] || \
+    die "AttestationLightClient deployment failed — check Besu logs"
+  log "  AttestationLightClient deployed: $lc_addr"
 
-  # Register with ICS26Router.addClient. merklePrefix = [bytes("ibc"), bytes("")].
+  # Register with ICS26Router.addClient. merklePrefix MUST have exactly 1
+  # element for AttestationLightClient: ICS24Host.prefixedPath() keeps
+  # merklePrefix.length unchanged and concatenates the packet commitment
+  # path into the last element — and the LC's verifyMembership requires
+  # path.length == 1, otherwise it reverts with InvalidPathLength(1, N).
+  # The old SP1ICS07Tendermint setup used `[bytes("ibc"), bytes("")]`
+  # (length 2) because Tendermint chains nest under an "ibc" subtree;
+  # attestation LCs verify the commitment directly so a single empty
+  # prefix is correct.
   local add_receipt add_status
   add_receipt=$(cast_in_net send "$ICS26_ROUTER_ADDR" \
     "addClient((string,bytes[]),address)" \
-    "($COSMOS_WASM_CLIENT_ID,[0x696263,0x])" "$sp1_ics07_addr" \
+    "($COSMOS_WASM_CLIENT_ID,[0x])" "$lc_addr" \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" --json 2>/dev/null) || add_receipt=""
   add_status=$(echo "$add_receipt" | jq -r '.status // empty' 2>/dev/null || echo "")
   [[ "$add_status" == "0x1" ]] || die "ICS26Router.addClient failed (status=$add_status)"
@@ -514,6 +552,7 @@ create_evm_ibc_client() {
   verify_addr=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getClient(string)(address)" "$predicted" \
     --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || verify_addr=""
   EVM_COSMOS_CLIENT_ID="$predicted"
+  EVM_ATTESTATION_LC_ADDR="$lc_addr"
   if [[ -n "$verify_addr" && "$verify_addr" != "0x0000000000000000000000000000000000000000" ]]; then
     log "EVM Cosmos client registered: $EVM_COSMOS_CLIENT_ID → $verify_addr"
   else
@@ -522,7 +561,7 @@ create_evm_ibc_client() {
 
   {
     echo "EVM_COSMOS_CLIENT_ID=$EVM_COSMOS_CLIENT_ID"
-    echo "SP1_ICS07_ADDR=$sp1_ics07_addr"
+    echo "EVM_ATTESTATION_LC_ADDR=$lc_addr"
   } >> "$IBC_STATE_FILE"
 }
 
@@ -933,7 +972,8 @@ setup_ibc() {
   run_db_migrations
 
   run_phase "Phase 4E:  Start relayer"                    start_relayer
-  run_phase "Phase 4E1: Start attestor"                   start_attestor
+  run_phase "Phase 4E1: Start attestor (EVM watcher)"     start_attestor
+  run_phase "Phase 4E1a: Start attestor (Cosmos watcher)" start_attestor_cosmos
   run_phase "Phase 4E2: Start proof API"                  start_proof_api
   run_phase "Phase 4E3: Create EVM-side Cosmos client"    create_evm_ibc_client
 
@@ -958,7 +998,7 @@ setup_ibc() {
   info "════════════════════════════════════════════════════════"
   info " ICS26Router          : $ICS26_ROUTER_ADDR"
   info " ICS20Transfer        : $ICS20_TRANSFER_ADDR"
-  info " SP1ICS07Tendermint   : ${SP1_ICS07_ADDR:-<not found>}"
+  info " AttestationLightClient (EVM-side Cosmos LC) : ${EVM_ATTESTATION_LC_ADDR:-<not found>}"
   info " IFT ERC20            : ${IFT_CONTRACT_ADDR:-<not deployed>}"
   info " Cosmos IFT denom     : ${COSMOS_IFT_DENOM:-<not set>}"
   info " Wasm checksum        : $WASM_CHECKSUM"

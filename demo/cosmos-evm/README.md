@@ -4,8 +4,10 @@ End-to-end demo of bidirectional IBC v2 token transfers between a Cosmos chain
 (`wfchain`) and an Ethereum devnet (Hyperledger Besu + Teku). Transfers use
 wfchain's **IFT** (Interchain Fungible Token) module — a tokenfactory-backed
 mint/burn bridge that rides on top of **ICS27 GMP** (General Message Passing,
-port `gmpport`), not standard ICS20. SP1 proofs secure Cosmos→EVM and
-attestation-based light clients secure EVM→Cosmos.
+port `gmpport`), not standard ICS20. **Attestation-based light clients secure
+both directions**: an `AttestationLightClient` on EVM verifies Cosmos state, and
+an `08-wasm` attestation LC on Cosmos verifies EVM state. A single attestor key
+signs for both watchers (one process per chain).
 
 ---
 
@@ -16,8 +18,9 @@ on-chain. Skip to the one you need.
 
 ### 1. Services (Docker Compose)
 
-The seven long-running containers, their host ports, and which services must be
-healthy before each starts (`depends_on`).
+The eight long-running containers, their host ports, and which services must be
+healthy before each starts (`depends_on`). One attestor process per chain — the
+binary takes a singular `--chain-type` at startup.
 
 ```mermaid
 graph LR
@@ -25,7 +28,8 @@ graph LR
     besu[["besu<br/>:8545 JSON-RPC<br/>:8546 WS<br/>:8551 Engine (int.)"]]
     teku[["teku<br/>:5051 Beacon REST"]]
     postgres[["postgres<br/>:5432 (int.)"]]
-    attestor[["attestor<br/>:9101/9102 (int.)"]]
+    attestor[["attestor<br/>(EVM watcher)<br/>:9101/9102 (int.)"]]
+    attestorCosmos[["attestor-cosmos<br/>(Cosmos watcher)<br/>:9101/9102 (int.)"]]
     proofapi[["proof-api<br/>:9090 gRPC (int.)"]]
     relayer[["relayer<br/>:3000 API (int.)<br/>:9100 metrics (int.)"]]
 
@@ -33,10 +37,12 @@ graph LR
     attestor -->|depends_on<br/>service_healthy| besu
     attestor --> cosmos
     attestor --> teku
+    attestorCosmos -->|depends_on<br/>service_healthy| cosmos
     proofapi -->|depends_on<br/>service_healthy| besu
     proofapi --> cosmos
     proofapi --> teku
     proofapi -->|depends_on<br/>service_started| attestor
+    proofapi -->|depends_on<br/>service_started| attestorCosmos
     relayer -->|depends_on<br/>service_healthy| postgres
     relayer --> cosmos
     relayer --> besu
@@ -72,24 +78,24 @@ graph LR
 ### 3. EVM-side contracts
 
 On Besu, `ICS26Router` is the IBC hub; it routes `"gmpport"` to `ICS27GMP`
-and verifies Cosmos inbound state via `SP1ICS07Tendermint`. `TestIFT` is the
+and verifies Cosmos inbound state via `AttestationLightClient`. `TestIFT` is the
 ERC20 that mints/burns; `CosmosIFTSendCallConstructor` builds the `cosmostx`
 payload for EVM→Cosmos.
 
 ```mermaid
 graph LR
     User(["user"]) -->|cast send iftTransfer| TestIFT
-    Relayer(("relayer")) -->|recvPacket + SP1 proof| ICS26
+    Relayer(("relayer")) -->|recvPacket + attestation| ICS26
 
     subgraph EVM["Solidity contracts on Besu"]
         ICS26["ICS26Router<br/>ERC1967 proxy"]
-        SP1LC["SP1ICS07Tendermint<br/>client-N, verifies Cosmos state"]
+        AttLC["AttestationLightClient<br/>client-N, verifies Cosmos state<br/>(m-of-n attestor signatures)"]
         ICS27["ICS27GMP<br/>port 'gmpport'<br/>+ ICS27Account (CREATE2)"]
         TestIFT["TestIFT (ERC20 proxy)<br/>iftTransfer / iftMint"]
         Ctor["CosmosIFTSendCallConstructor<br/>encodes cosmostx MsgIFTMint<br/>(baked with ICA + denom)"]
     end
 
-    ICS26 -->|verifyMembership| SP1LC
+    ICS26 -->|verifyMembership| AttLC
     ICS26 -->|addIBCApp 'gmpport'| ICS27
     ICS27 -->|functionCall via ICS27Account| TestIFT
     TestIFT -->|sendCall via| ICS27
@@ -107,9 +113,10 @@ graph LR
 | `besu` | `hyperledger/besu:26.2.0` | 8545 JSON-RPC · 8546 WS | Ethereum execution layer |
 | `teku` | `consensys/teku:26.4` | 5051 Beacon REST | Ethereum consensus layer |
 | `relayer` | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | 3000 gRPC API · 9100 metrics | Bidirectional IBC packet relay |
-| `attestor` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP | Signs EVM state attestations for EVM→Cosmos proofs |
-| `proof-api` | `ghcr.io/cosmos/proof-api:latest` | 9090 gRPC | Generates SP1 proofs for Cosmos→EVM packets |
-| `postgres` | postgres | 5432 | Relayer packet state persistence |
+| `attestor` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Besu — signs EVM state attestations for the 08-wasm LC on Cosmos |
+| `attestor-cosmos` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Cosmos — signs Cosmos state attestations for `AttestationLightClient` on EVM |
+| `proof-api` | `ghcr.io/cosmos/proof-api:latest` | 9090 gRPC (int.) | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
+| `postgres` | postgres | 5432 (int.) | Relayer packet state persistence |
 
 ---
 
@@ -119,9 +126,10 @@ graph LR
 Cosmos chain                        EVM (Besu)
 ────────────────────────────────    ─────────────────────────────────
 attestations-N                      client-N
-  type: 08-wasm (attestation LC)      type: SP1ICS07Tendermint
+  type: 08-wasm (attestation LC)      type: AttestationLightClient
   verifies: EVM packet commitments    verifies: Cosmos packet commitments
-  proof: attestor signatures          proof: SP1 ZK proofs
+  proof: attestor signatures          proof: attestor signatures
+    (attestor watches besu)             (attestor-cosmos watches cosmos)
   merkle prefix: [""]                 counterparty: attestations-N
 ```
 
@@ -140,15 +148,16 @@ Cosmos IFT module
  └─ asks GMP to send packet on port "gmpport" with "evm" constructor
         │
         ▼  Relayer polls cosmos:26657, picks up SendPacket
-Proof API (cosmos_to_eth)
- ├─ fetches Cosmos header + commitment proof  → cosmos:26657
- └─ generates SP1 ZK proof
-        │ returns proof bytes (gRPC)
+Proof API (cosmos_to_eth, attested mode)
+ ├─ fetches Cosmos packet commitment           → cosmos:26657
+ └─ queries attestor-cosmos for signature      → attestor-cosmos:9101
+        │ Attestor reads Cosmos state          → cosmos:26657
+        │ returns signed attestation
         ▼
 Relayer submits MsgRecvPacket
  └─ eth_sendRawTransaction                    → besu:8545
        │ ICS26Router.recvPacket(packet, proof)
-       ├─ SP1ICS07Tendermint.verifyMembership   (light-client verification)
+       ├─ AttestationLightClient.verifyMembership   (m-of-n signature check)
        └─ routes to "gmpport" → ICS27GMP.onRecvPacket
              ├─ _getOrCreateAccount(clientId, sender)  (CREATE2 proxy)
              └─ account.functionCall(TestIFT, payload)
@@ -210,8 +219,9 @@ at each run — don't edit them by hand.
 |------|---------------|----------|
 | `ibc/state.env` | `ibc/state.env.tmpl` | Persisted contract addresses and client IDs across runs |
 | `ibc/local/config.yml` | `ibc/relayer-config.yml.tmpl` | Relayer chain config (endpoints, client ID mappings) |
-| `ibc/local/relayer.json` | `ibc/proof-api.json.tmpl` | Proof API module config (SP1 programs, attestor endpoints) |
-| `ibc/local/attestor-config.toml` | `ibc/attestor-config.toml.tmpl` | Attestor EVM RPC and router contract address |
+| `ibc/local/relayer.json` | `ibc/proof-api.json.tmpl` | Proof API module config (attested mode in both directions, attestor endpoints) |
+| `ibc/local/attestor-config.toml` | `ibc/attestor-config.toml.tmpl` | EVM-watching attestor — Besu RPC and `ICS26Router` address |
+| `ibc/local/attestor-cosmos-config.toml` | `ibc/attestor-cosmos-config.toml.tmpl` | Cosmos-watching attestor — CometBFT RPC URL only (no router) |
 | `ibc/local/keys.json` | `ibc/relayer-keys.json.tmpl` | Relayer signing keys (Cosmos mnemonic + EVM private key) |
 | (cosmos-data volume) | `ibc/client-state.json.tmpl`, `ibc/consensus-state.json.tmpl` | Attestation LC ClientState + ConsensusState passed to `MsgCreateClient` |
 
@@ -270,10 +280,11 @@ demo/cosmos-evm/
     jwt.hex, cl-genesis.ssz — generated at first run (gitignored)
 
   ibc/                      — IBC service inputs + runtime state
-    relayer-config.yml.tmpl   — rendered to ibc/local/config.yml
-    proof-api.json.tmpl       — rendered to ibc/local/relayer.json
-    attestor-config.toml.tmpl — rendered to ibc/local/attestor-config.toml
-    relayer-keys.json.tmpl    — rendered to ibc/local/keys.json
+    relayer-config.yml.tmpl          — rendered to ibc/local/config.yml
+    proof-api.json.tmpl              — rendered to ibc/local/relayer.json
+    attestor-config.toml.tmpl        — rendered to ibc/local/attestor-config.toml         (EVM watcher)
+    attestor-cosmos-config.toml.tmpl — rendered to ibc/local/attestor-cosmos-config.toml  (Cosmos watcher)
+    relayer-keys.json.tmpl           — rendered to ibc/local/keys.json
     client-state.json.tmpl, consensus-state.json.tmpl — attestation LC create-client inputs
     state.env.tmpl            — rendered to ibc/state.env
     state.env                 — persisted addresses + IDs (gitignored)
@@ -343,7 +354,7 @@ All tags pin to `${VAR:-default}` in `setup.sh` — override any variable to use
 | `oven/bun:1` | `BUN_IMAGE` | `bun install` for solidity-ibc-eureka deps |
 | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | `OPERATOR_IMAGE` | IBC packet relayer |
 | `ghcr.io/cosmos/ibc-attestor:latest` | `ATTESTOR_IMAGE` | EVM state attestor |
-| `ghcr.io/cosmos/proof-api:latest` | `PROOF_API_IMAGE` | SP1 proof generation service |
+| `ghcr.io/cosmos/proof-api:latest` | `PROOF_API_IMAGE` | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
 | `postgres:16` | (compose) | Relayer packet-state DB |
 | `fullstorydev/grpcurl:latest` | (helper) | gRPC calls to relayer + proof-api |
 | `migrate/migrate` | (helper) | Relayer DB migrations |
@@ -368,7 +379,8 @@ Any of these, if pre-set, skips the corresponding step — useful for an existin
 | `SOLIDITY_IBC_DIR` | GitHub tarball fetch — uses the provided checkout |
 | `ETHEREUM_LC_WASM_PATH` | Wasm extraction from tarball |
 | `WASM_CHECKSUM` | Wasm fetch + SHA-256 compute |
-| `ICS26_ROUTER_ADDR` + `ICS20_TRANSFER_ADDR` (AND router has bytecode on-chain) | Forge deploy — uses pre-deployed addresses. `SP1_ICS07_ADDR` is NOT part of the gate because it's deployed by `create_evm_ibc_client` via proof-api, not by `E2ETestDeploy`. The on-chain bytecode probe re-deploys if Besu's volume was wiped but state.env survived. |
+| `ICS26_ROUTER_ADDR` + `ICS20_TRANSFER_ADDR` (AND router has bytecode on-chain) | Forge deploy — uses pre-deployed addresses. `EVM_ATTESTATION_LC_ADDR` is NOT part of this gate because it's deployed by `create_evm_ibc_client` via `cast --create`, not by `E2ETestDeploy`. The on-chain bytecode probe re-deploys if Besu's volume was wiped but state.env survived. |
+| `EVM_ATTESTATION_LC_ADDR` | `AttestationLightClient` deploy — uses an existing on-chain LC. Must be already registered with `ICS26Router.addClient`. |
 | `COSMOS_WASM_CLIENT_ID` / `EVM_COSMOS_CLIENT_ID` | Client creation — uses existing clients (validated by `reconcile_ibc_client_pair`) |
 | `IFT_MINT_AMOUNT` (tunable, default `1000000000`) | Amount minted into the sender JIT when the Cosmos→EVM demo needs IFT balance |
 | `RELAYER_TX_FEE_AMOUNT` (tunable, default `20000`) | Flat fee (uatom) attached to every relayer-submitted tx on Cosmos — needs to clear `min-gas-prices × gas` |
@@ -378,9 +390,9 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 ### Files and volumes written
 
 - **Under `evm/`:** `jwt.hex`, `cl-genesis.ssz`, temporary `mnemonics.yaml` (removed after use)
-- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,.ibc-attestor/}`, `cw_ics08_wasm_eth.wasm`, `solidity-ibc-eureka-<tag>/`, `ibc-relayer-<tag>/`
+- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `cw_ics08_wasm_eth.wasm`, `solidity-ibc-eureka-<tag>/`, `ibc-relayer-<tag>/`
 - **Under `logs/`:** `setup-YYYYMMDD-HHMMSS.log` (one per run)
-- **Docker volumes** (prefixed with project dir name): `cosmos-data`, `besu-data`, `teku-data`, `relayer-data`, `attestor-data`, `postgres-data`
+- **Docker volumes** (prefixed with project dir name): `cosmos-data`, `besu-data`, `teku-data`, `relayer-data`, `attestor-data`, `attestor-cosmos-data`, `postgres-data`
 
 `./setup.sh clean` removes all of the above except the downloaded source tarballs in `ibc/` (those stay cached for fast re-runs).
 
@@ -441,7 +453,7 @@ sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
 | 2 | `start_services` | `lib/chains.sh` | `docker compose up -d cosmos teku` (Besu already running) |
 | 3 | `wait_for_services` | `lib/chains.sh` | Poll cosmos status + teku sync endpoint |
 | 4A0 | `fetch_solidity_ibc` | `lib/ibc.sh` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`) |
-| 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | `forge script E2ETestDeploy` — deploys ICS26Router, ICS20Transfer, **ICS27GMP**, **TestIFT**, SP1 verifiers. Registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. |
+| 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | `forge script E2ETestDeploy` — deploys ICS26Router, ICS20Transfer, **ICS27GMP**, **TestIFT**. Registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
 | 4A1 | `deploy_ift_contracts` | `lib/ibc.sh` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
 | 4B0 | `fetch_ethereum_lc_wasm` | `lib/ibc.sh` | Extract `cw_ics08_wasm_eth.wasm` from the downloaded source tarball |
 | 4B | `store_ethereum_lc` | `lib/ibc.sh` | Compute SHA-256 of the LC wasm (it was already embedded in Cosmos genesis in Phase 1A) |
@@ -451,9 +463,10 @@ sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
 | 4D1 | `generate_proof_api_config` | `lib/ibc.sh` | Render `relayer.json` before starting relayer (relayer depends_on proof-api; if the mount source is missing Docker creates a directory at its path) |
 | 4E0 | DB migrations | `lib/ibc.sh` | `docker compose up -d postgres` + run migrate against the schema shipped with `cosmos/ibc-relayer` |
 | 4E | `start_relayer` | `lib/ibc.sh` | `docker compose up -d relayer` |
-| 4E1 | `start_attestor` | `lib/ibc.sh` | Ensure attestor keystore, `docker compose up -d attestor` |
-| 4E2 | `start_proof_api` | `lib/ibc.sh` | `docker compose up -d proof-api` |
-| 4E3 | `create_evm_ibc_client` | `lib/ibc.sh` | Fetch SP1ICS07Tendermint init bytecode from proof-api gRPC, deploy via `cast --create`, register with `ICS26Router.addClient("client-N", …)` |
+| 4E1 | `start_attestor` | `lib/ibc.sh` | Ensure attestor keystore, `docker compose up -d attestor` (EVM watcher) |
+| 4E1a | `start_attestor_cosmos` | `lib/ibc.sh` | `docker compose up -d attestor-cosmos` (Cosmos watcher, same keystore) |
+| 4E2 | `start_proof_api` | `lib/ibc.sh` | `docker compose up -d proof-api` (attested mode in both directions) |
+| 4E3 | `create_evm_ibc_client` | `lib/ibc.sh` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)`. |
 | 4F | `wait_for_ibc_ready` | `lib/ibc.sh` | Poll Cosmos REST + EVM router until both clients are live |
 | 4F2 | `register_counterparty` | `lib/ibc.sh` | Cosmos-side `add-counterparty attestations-N client-N` |
 | 4F3 | `register_ift_bridges` | `lib/ibc.sh` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT> evm`. Uses `cosmos_tx_and_wait` so each tx is poll-confirmed before the next fires. Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |

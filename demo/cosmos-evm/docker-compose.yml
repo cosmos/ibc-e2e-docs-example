@@ -127,9 +127,10 @@ services:
         condition: service_started
     restart: on-failure
 
-  # ── IBC Attestor ──────────────────────────────────────────────────────────
-  # Watches both chains for IBC events and produces attestations that the
-  # relayer uses to advance the light client state on each counterparty.
+  # ── IBC Attestor (EVM watcher) ────────────────────────────────────────────
+  # Watches Besu (EVM) for IBC events. Attestations advance the EVM light
+  # client (08-wasm) on Cosmos. One process per chain — the binary takes a
+  # singular --chain-type at startup, so a second service watches Cosmos.
   attestor:
     image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
     container_name: ibc-attestor
@@ -148,16 +149,32 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  # ── SP1 Proof API ─────────────────────────────────────────────────────────
-  # Generates SP1 ZK proofs (or mock proofs when SP1_PROVER=mock) for the
-  # 08-wasm Ethereum light client on the Cosmos chain.  The relayer connects
-  # to this service over gRPC to fetch proofs before submitting UpdateClient.
+  # ── IBC Attestor (Cosmos watcher) ─────────────────────────────────────────
+  # Watches Cosmos (CometBFT) for IBC events. Attestations advance the
+  # AttestationLightClient on EVM (replaces SP1ICS07Tendermint). Shares the
+  # keystore with the EVM-watching attestor, so a single attestor address
+  # is registered with both light clients.
+  attestor-cosmos:
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    container_name: ibc-attestor-cosmos
+    command: [ "server", "--config", "/config/attestor-cosmos-config.toml", "--chain-type", "cosmos", "--signer-type", "local" ]
+    volumes:
+      - ./ibc/local:/config:ro
+      - attestor-cosmos-data:/data
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── Proof API (attestation aggregator) ────────────────────────────────────
+  # Wraps the attestor services behind a gRPC interface the relayer can call
+  # to fetch attestations for both directions. Configured in fully attested
+  # mode — no SP1 ZK proof generation in this demo.
   proof-api:
     image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}
     container_name: ibc-proof-api
-    environment:
-      SP1_PROGRAM_VERSIONS: ${SP1_PROGRAMS_TAG:-v1.2.0}
-      SP1_PROVER: mock
     volumes:
       - ./ibc/local/relayer.json:/usr/local/relayer/relayer.json:ro
     networks:
@@ -171,6 +188,8 @@ services:
         condition: service_healthy
       attestor:
         condition: service_started
+      attestor-cosmos:
+        condition: service_started
     restart: on-failure
 
 volumes:
@@ -179,6 +198,7 @@ volumes:
   teku-data:
   relayer-data:
   attestor-data:
+  attestor-cosmos-data:
   postgres-data:
 
 

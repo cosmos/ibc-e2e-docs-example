@@ -30,3 +30,7 @@ jobs:
           ETH2_TESTNET_GENESIS_IMAGE: ethpandaops/ethereum-genesis-generator:master-linux-amd64
           PYTHONUNBUFFERED: "1"
         run: ./setup.sh
+
+      - name: Tear down
+        if: always()
+        run: ./setup.sh clean || true

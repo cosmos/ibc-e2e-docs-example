@@ -21,7 +21,8 @@
 # Environment (optional):
 #   SOLIDITY_IBC_DIR       — local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
 #   ETHEREUM_LC_WASM_PATH  — path to ethereum-lc.wasm; otherwise extracted from tarball
-#   ICS26_ROUTER_ADDR / ICS20_TRANSFER_ADDR / SP1_ICS07_ADDR — skip forge deploy
+#   ICS26_ROUTER_ADDR / ICS20_TRANSFER_ADDR — skip forge deploy
+#   EVM_ATTESTATION_LC_ADDR — skip AttestationLightClient deploy
 #   WASM_CHECKSUM          — skip wasm fetch
 #
 # Requirements: docker (compose plugin), jq, curl, openssl
@@ -93,10 +94,12 @@ SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-}"
 # Pin to a specific tag once main stabilises an ICS27-aware release.
 SOLIDITY_IBC_TAG="${SOLIDITY_IBC_TAG:-main}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/E2ETestDeploy.s.sol}"
-SP1_PROVER="${SP1_PROVER:-mock}"
 ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
 ICS20_TRANSFER_ADDR="${ICS20_TRANSFER_ADDR:-}"
-SP1_ICS07_ADDR="${SP1_ICS07_ADDR:-}"
+# AttestationLightClient on EVM — replaces SP1ICS07Tendermint. Deployed by
+# create_evm_ibc_client; pre-set to skip that phase if you already have one
+# wired up to ICS26Router.
+EVM_ATTESTATION_LC_ADDR="${EVM_ATTESTATION_LC_ADDR:-}"
 ETHEREUM_LC_WASM_PATH="${ETHEREUM_LC_WASM_PATH:-}"
 WASM_CHECKSUM="${WASM_CHECKSUM:-}"
 
