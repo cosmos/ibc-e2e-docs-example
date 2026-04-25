@@ -113,9 +113,23 @@ deploy_ibc_contracts() {
 
   log "Deploying solidity-ibc-eureka contracts on Besu (chain-id $ETH_CHAIN_ID)..."
 
-  if [[ ! -d "$SOLIDITY_IBC_DIR/node_modules" ]]; then
+  # Linux bind-mount permission fix (no-op on macOS Docker Desktop):
+  # foundry + bun images run as UID 1000 by default; a GitHub runner's
+  # checkout is owned by a different UID (1001), so the non-root container
+  # user can't MKDIR `out/` / `cache/` / `broadcast/` / `node_modules/` at
+  # the root of the bind mount and forge aborts with
+  # `"/contracts/out": Permission denied (os error 13)`.
+  #
+  # Pre-create those subdirs on the host with world-write (0777) so forge /
+  # bun write INTO them instead of trying to create them — narrower than a
+  # recursive chmod on the whole source tree.
+  mkdir -p "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules}
+  chmod 0777 "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules} 2>/dev/null || true
+
+  if [[ ! -d "$SOLIDITY_IBC_DIR/node_modules" ]] || [[ -z "$(ls -A "$SOLIDITY_IBC_DIR/node_modules" 2>/dev/null)" ]]; then
     log "Installing contract dependencies (bun install)..."
-    docker run --rm -v "$SOLIDITY_IBC_DIR":/contracts -w /contracts \
+    docker run --rm \
+      -v "$SOLIDITY_IBC_DIR":/contracts -w /contracts \
       "$BUN_IMAGE" bun install --frozen-lockfile
   fi
 
@@ -603,28 +617,77 @@ register_ift_bridges() {
   fi
   log "  Cosmos IFT denom: $COSMOS_IFT_DENOM"
 
-  # Create the tokenfactory subdenom (wfchain's IFT module is tokenfactory-
-  # backed, so minting goes through `tx tokenfactory ...`). cosmos_tx_and_wait
-  # dies loudly if the tx fails — no more "pending at sleep-3" race where
-  # register-bridge fires before create-denom commits.
-  local subdenom="${COSMOS_IFT_DENOM##*/}"
-  log "  Creating tokenfactory denom '$subdenom'..."
-  cosmos_tx_and_wait tx tokenfactory create-denom "$subdenom" \
-    --from validator >/dev/null
-  log "  Denom created."
+  # Idempotency guard: if the bridge is already registered on-chain, skip the
+  # create-denom + register-bridge txs (they would fail with "denom already
+  # exists" / "bridge already registered" and die under cosmos_tx_and_wait,
+  # aborting the whole setup on re-runs).
+  local existing_bridge
+  existing_bridge=$(docker compose exec -T cosmos wfchaind query ift bridge \
+    "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" \
+    --node tcp://localhost:26657 -o json 2>/dev/null \
+    | jq -r '.bridge.counterparty_ift_address // empty' 2>/dev/null || echo "")
+  # CRITICAL: register the bridge with the EIP-55 CHECKSUMMED form of the EVM
+  # IFT contract address. wfchain's x/ift MsgIFTMint handler does a plain
+  # string compare:   bridge.CounterpartyIftAddress == accountID.Sender
+  # and the GMP packet's sender field is recorded by ICS27GMP in checksummed
+  # form (e.g. 0x9A676e78… not 0x9a676e78…). Registering with the lowercase
+  # form makes that check fail at recv time and the relayer reports
+  # COMPLETE_WITH_WRITE_ACK_ERROR — packet acked, but no mint.
+  local ift_addr_checksum
+  ift_addr_checksum=$(cast_in_net to-check-sum-address "$IFT_CONTRACT_ADDR" 2>/dev/null \
+    | tr -d '[:space:]') || ift_addr_checksum=""
+  [[ -n "$ift_addr_checksum" ]] || ift_addr_checksum="$IFT_CONTRACT_ADDR"
 
-  # tx ift register-bridge [denom] [client_id] [counterparty_ift_address] [ift_send_call_constructor]
-  # constructor = "evm" for an EVM counterparty (vs. "cosmostx").
-  log "  Registering Cosmos IFT bridge (client=$COSMOS_WASM_CLIENT_ID → evm=$IFT_CONTRACT_ADDR)..."
-  cosmos_tx_and_wait tx ift register-bridge \
-    "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" "$IFT_CONTRACT_ADDR" evm \
-    --from validator >/dev/null
+  # Self-heal: if a previous setup registered with the wrong casing (e.g. before
+  # this fix landed), remove the stale bridge and re-register with the correct
+  # checksum form. Avoids forcing the user into manual `tx ift remove-bridge`
+  # recovery dances when re-running after upgrading the script.
+  if [[ -n "$existing_bridge" && "$existing_bridge" != "$ift_addr_checksum" ]]; then
+    log "Cosmos IFT bridge registered with stale address:"
+    log "  on chain: $existing_bridge"
+    log "  expected: $ift_addr_checksum  (EIP-55 checksum)"
+    log "  → removing and re-registering with the correct casing..."
+    cosmos_tx_and_wait tx ift remove-bridge \
+      "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" \
+      --from validator >/dev/null
+    existing_bridge=""  # fall through to the registration block below
+  fi
+
+  if [[ -n "$existing_bridge" ]]; then
+    log "Cosmos IFT bridge already registered (→ $existing_bridge) — skipping create-denom + register-bridge"
+  else
+    # Idempotency on create-denom: only create if the validator hasn't already
+    # registered this subdenom under tokenfactory (re-running after a partial
+    # setup must not re-broadcast `create-denom` — it would die under
+    # cosmos_tx_and_wait with "denom already exists").
+    local subdenom="${COSMOS_IFT_DENOM##*/}"
+    local validator_addr
+    validator_addr=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
+      --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
+    if docker compose exec -T cosmos wfchaind query tokenfactory denoms-by-creator \
+         "$validator_addr" --node tcp://localhost:26657 -o json 2>/dev/null \
+         | jq -e --arg s "$subdenom" '.denoms[]? | select(. == $s)' >/dev/null 2>&1; then
+      log "  Denom '$subdenom' already created by validator — skipping create-denom"
+    else
+      log "  Creating tokenfactory denom '$subdenom'..."
+      cosmos_tx_and_wait tx tokenfactory create-denom "$subdenom" \
+        --from validator >/dev/null
+      log "  Denom created."
+    fi
+
+    # tx ift register-bridge [denom] [client_id] [counterparty_ift_address] [ift_send_call_constructor]
+    # constructor = "evm" for an EVM counterparty (vs. "cosmostx").
+    log "  Registering Cosmos IFT bridge (client=$COSMOS_WASM_CLIENT_ID → evm=$ift_addr_checksum)..."
+    cosmos_tx_and_wait tx ift register-bridge \
+      "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" "$ift_addr_checksum" evm \
+      --from validator >/dev/null
+    log "Cosmos IFT bridge registered"
+  fi
 
   # EVM-side registration is done in a separate phase (register_evm_ift_bridge)
   # because it needs the ICA address derived from ICS26Router + TestIFT proxy,
   # and then deploys the CosmosIFTSendCallConstructor parameterised with it.
 
-  log "Cosmos IFT bridge registered"
   echo "COSMOS_IFT_DENOM=$COSMOS_IFT_DENOM" >> "$IBC_STATE_FILE"
 
   # Default the demo to transfer IFT instead of uatom. Persist so it survives
@@ -672,16 +735,49 @@ register_evm_ift_bridge() {
   [[ -n "$COSMOS_WASM_CLIENT_ID" ]]  || { warn "COSMOS_WASM_CLIENT_ID not set — skipping EVM IFT bridge"; return 0; }
   [[ -n "$COSMOS_IFT_DENOM" ]]       || { warn "COSMOS_IFT_DENOM not set — skipping EVM IFT bridge"; return 0; }
 
-  # 1a. ICA — the Cosmos address that will sign MsgIFTMint when EVM→Cosmos
-  #     transfers arrive. Derived from (Cosmos client tracking EVM, TestIFT
-  #     proxy address, empty salt). Used ONLY inside CosmosIFTSendCallConstructor.
-  log "  Computing ICA for (client=$COSMOS_WASM_CLIENT_ID, sender=$IFT_CONTRACT_ADDR)..."
+  # Compute the correct ICA up front (requires the EIP-55 checksummed EVM
+  # address; see comment block below). Compare against state.env's stored
+  # value to decide whether we can skip or need to redeploy.
+  #
+  # CRITICAL: the sender string for ICA derivation MUST be in EIP-55
+  # checksummed form. ICS27GMP.sendCall records the EVM sender with mixed
+  # case (e.g. 0x9A676e781A523b5d0C0e43731313A708CB607508), and Cosmos GMP
+  # derives the ICA by hashing that exact string at packet-recv time.
+  # Querying gmp get-address with lowercase produces a DIFFERENT ICA, the
+  # signer check on MsgIFTMint fails, and the packet gets an error ack —
+  # the relayer reports COMPLETE_WITH_WRITE_ACK_ERROR even though no
+  # mint actually happened.
+  local ift_addr_checksum
+  ift_addr_checksum=$(cast_in_net to-check-sum-address "$IFT_CONTRACT_ADDR" 2>/dev/null \
+    | tr -d '[:space:]') || ift_addr_checksum=""
+  [[ -n "$ift_addr_checksum" ]] || ift_addr_checksum="$IFT_CONTRACT_ADDR"
+
+  log "  Computing ICA for (client=$COSMOS_WASM_CLIENT_ID, sender=$ift_addr_checksum)..."
   local ica
   ica=$(docker compose exec -T cosmos wfchaind query gmp get-address \
-    "$COSMOS_WASM_CLIENT_ID" "$IFT_CONTRACT_ADDR" "" -o json 2>/dev/null \
+    "$COSMOS_WASM_CLIENT_ID" "$ift_addr_checksum" "" -o json 2>/dev/null \
     | jq -r '.account_address // empty' 2>/dev/null) || ica=""
   [[ -n "$ica" ]] || { warn "Failed to compute ICA via 'query gmp get-address'"; return 0; }
   log "  ICA: $ica"
+
+  # Idempotency / self-heal: skip everything below if state.env already has
+  # an ICA matching what we just computed (the ICA is a deterministic
+  # function of client + checksum-sender + salt, so a match means we're
+  # using the correct CosmosIFTSendCallConstructor that was deployed in a
+  # prior run). If state.env's ICA differs (e.g. it was written by an
+  # earlier setup that queried with the wrong-cased sender), fall through
+  # to redeploy the constructor with the correct ICA and re-register the
+  # bridge on TestIFT — overwriting the stale registration.
+  if [[ "${IFT_ICA_ADDRESS:-}" == "$ica" && -n "${IFT_CTOR_ADDR:-}" && -n "${COSMOS_IFT_MODULE_ADDR:-}" ]]; then
+    log "EVM IFT bridge already registered with correct ICA — skipping"
+    return 0
+  fi
+  if [[ -n "${IFT_ICA_ADDRESS:-}" && "$IFT_ICA_ADDRESS" != "$ica" ]]; then
+    log "Stale EVM IFT bridge state detected:"
+    log "  state.env: $IFT_ICA_ADDRESS"
+    log "  expected:  $ica"
+    log "  → redeploying CosmosIFTSendCallConstructor + re-registering bridge on TestIFT"
+  fi
 
   # 1b. Cosmos IFT module account — the `.sender` in outgoing GMP packets
   #     FROM Cosmos (different from the ICA!). TestIFT.iftMint checks that
@@ -770,18 +866,16 @@ reconcile_ibc_client_pair() {
   cosmos_cp=$(curl -sf "http://localhost:1317/ibc/core/client/v2/counterparty_info/${COSMOS_WASM_CLIENT_ID}" 2>/dev/null \
     | jq -r '.counterparty_info.client_id // empty' 2>/dev/null || echo "")
 
-  local evm_cp_raw evm_cp
-  evm_cp_raw=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getCounterparty(string)" "$EVM_COSMOS_CLIENT_ID" \
-    --rpc-url "http://besu:8545" 2>/dev/null) || evm_cp_raw=""
-  evm_cp=$(
-    hex="${evm_cp_raw#0x}"
-    [[ ${#hex} -ge 128 ]] || exit 1
-    outer_off=$(( 16#${hex:0:64} ))
-    cid_rel_off=$(( 16#${hex:$(( outer_off * 2 )):64} ))
-    cid_len_pos=$(( (outer_off + cid_rel_off) * 2 ))
-    cid_len=$(( 16#${hex:$cid_len_pos:64} ))
-    printf '%s' "${hex:$(( cid_len_pos + 64 )):$(( cid_len * 2 ))}" | xxd -r -p
-  ) 2>/dev/null || evm_cp=""
+  # Decode ICS26Router.getCounterparty → CounterpartyInfo(string clientId, bytes[] merklePrefix).
+  # `cast call` with the `(string,bytes[])` return signature gives us a parsed
+  # multi-line output where the first line is the clientId string. Drop the
+  # hand-rolled ABI pointer arithmetic — any layout change breaks it silently.
+  local evm_cp
+  evm_cp=$(cast_in_net call "$ICS26_ROUTER_ADDR" \
+    "getCounterparty(string)((string,bytes[]))" "$EVM_COSMOS_CLIENT_ID" \
+    --rpc-url "http://besu:8545" 2>/dev/null \
+    | sed -n 's/^(//; s/,.*$//; s/"//g; 1p' \
+    | tr -d '[:space:]') || evm_cp=""
 
   if [[ "$cosmos_cp" == "$EVM_COSMOS_CLIENT_ID" && "$evm_cp" == "$COSMOS_WASM_CLIENT_ID" ]]; then
     log "IBC client pair verified: $COSMOS_WASM_CLIENT_ID ↔ $EVM_COSMOS_CLIENT_ID"
@@ -810,10 +904,13 @@ setup_ibc() {
   log "║  IBC Setup: Cosmos ↔ Besu + Teku (Ethereum)       ║"
   log "╚══════════════════════════════════════════════════╝"
 
-  # Reset state.env so each run starts clean; reconcile/create will repopulate.
-  : > "$IBC_STATE_FILE"
-  COSMOS_WASM_CLIENT_ID=""; EVM_COSMOS_CLIENT_ID=""
-  SP1_ICS07_ADDR=""; IFT_ICA_ADDRESS=""; IFT_CTOR_ADDR=""
+  # DO NOT wipe state.env here: each phase is idempotent (checks state or
+  # the chain before re-submitting), so preserving prior addresses + client
+  # IDs across `./setup.sh ibc` re-runs is what makes the flow fast. The
+  # earlier blanket truncation + shell-var clear forced every phase to
+  # re-do its work (re-deploying constructors, re-creating clients, etc.).
+  # reconcile_ibc_client_pair clears stale client IDs on its own if the
+  # on-chain counterparty pair doesn't match.
 
   run_phase "Phase 4A0: Fetch solidity-ibc-eureka source" fetch_solidity_ibc
   run_phase "Phase 4A:  Deploy IBC contracts on Besu"     deploy_ibc_contracts

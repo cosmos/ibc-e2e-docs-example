@@ -10,6 +10,7 @@ die()  { echo -e "${RED}[$(date '+%H:%M:%S')] ERROR${NC} $*" >&2; exit 1; }
 check_prerequisites() {
   log "Checking prerequisites..."
   command -v docker    >/dev/null || die "docker is required"
+  command -v perl      >/dev/null || die "perl is required (used to strip ANSI codes from the log file)"
   docker compose version >/dev/null 2>&1 || die "'docker compose' plugin required"
   command -v jq        >/dev/null || die "jq is required"
   command -v curl      >/dev/null || die "curl is required"

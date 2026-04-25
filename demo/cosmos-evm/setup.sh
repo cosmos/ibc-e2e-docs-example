@@ -52,7 +52,15 @@ export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}"
 export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:26.2.0}"
 export TEKU_IMAGE="${TEKU_IMAGE:-consensys/teku:26.4}"
 export ETH2_VAL_TOOLS_IMAGE="${ETH2_VAL_TOOLS_IMAGE:-protolambda/eth2-val-tools}"
-export ETH2_TESTNET_GENESIS_IMAGE="${ETH2_TESTNET_GENESIS_IMAGE:-ethpandaops/ethereum-genesis-generator:master-linux-arm64}"
+# ethpandaops publishes separate arch-specific tags for this image (no
+# multi-arch manifest), so pick based on host. Apple-silicon dev hosts get
+# arm64; everything else (x86 Linux, CI runners) gets amd64.
+case "$(uname -m)" in
+  arm64|aarch64) _eth2_genesis_arch="arm64" ;;
+  *)             _eth2_genesis_arch="amd64" ;;
+esac
+export ETH2_TESTNET_GENESIS_IMAGE="${ETH2_TESTNET_GENESIS_IMAGE:-ethpandaops/ethereum-genesis-generator:master-linux-${_eth2_genesis_arch}}"
+unset _eth2_genesis_arch
 export FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:latest}"
 export BUN_IMAGE="${BUN_IMAGE:-oven/bun:1}"
 export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}"
@@ -144,7 +152,8 @@ cmd_chains() {
 cmd_ibc() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
   setup_ibc
-  register_counterparty
+  # register_counterparty already runs inside setup_ibc (Phase 4F2); no
+  # need to call it again here.
 }
 
 cmd_demo() {
