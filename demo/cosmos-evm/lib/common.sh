@@ -94,6 +94,16 @@ grpc_call() {
     fullstorydev/grpcurl:latest -plaintext "$@"
 }
 
+# HTTP curl inside the compose network. Use this for endpoints that aren't
+# published on the host: relayer :3000 (gRPC API + /health), relayer :9100
+# (Prometheus), attestor :9102 (HTTP health). Internal-only by docker-compose
+# convention. Args are forwarded to curl as-is.
+curl_in_net() {
+  docker run --rm --entrypoint "" \
+    --network "${COMPOSE_PROJECT}_ibc-net" \
+    curlimages/curl:latest curl "$@"
+}
+
 # Poll an EVM JSON-RPC endpoint until eth_blockNumber succeeds.
 wait_for_rpc() {
   local name="$1" url="$2" max=120 step=3 elapsed=0

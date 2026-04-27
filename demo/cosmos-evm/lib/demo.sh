@@ -414,29 +414,44 @@ demo_failure_and_retry() {
 demo_observability() {
   log "╔══ Demo: Prometheus metrics + structured logs ═══════════════════════════╗"
 
-  log "  Relayer health (HTTP :3000/health)"
-  if curl -sf http://localhost:3000/health >/dev/null 2>&1; then
+  log "  Relayer health (relayer:3000/health, via ibc-net)"
+  if curl_in_net -sf http://relayer:3000/health >/dev/null 2>&1; then
     log "  → SERVING"
   else
     warn "  → not reachable yet"
   fi
 
   log ""
-  log "  Relayer Prometheus metrics (:9100/metrics) — sample:"
-  curl -sf http://localhost:9100/metrics 2>/dev/null \
-    | grep -E "^(ibc_relay|ibc_gas|ibc_transfer|go_goroutines)" | head -20 \
-    || warn "  Prometheus metrics not yet available at :9100"
+  log "  Relayer Prometheus metrics (relayer:9100/metrics) — sample:"
+  local metrics
+  metrics=$(curl_in_net -sf http://relayer:9100/metrics 2>/dev/null) || metrics=""
+  if [[ -n "$metrics" ]]; then
+    local ibc_lines
+    ibc_lines=$(echo "$metrics" | grep -E "^(ibc_relay|ibc_gas|ibc_transfer|go_goroutines)" | head -20)
+    if [[ -n "$ibc_lines" ]]; then
+      echo "$ibc_lines"
+    else
+      echo "$metrics" | grep -v "^#" | head -10
+    fi
+  else
+    warn "  Prometheus metrics not reachable at relayer:9100"
+  fi
 
   if docker compose ps attestor 2>/dev/null | grep -q "Up"; then
     log ""
-    log "  Attestor health (:9101/health)"
-    curl -sf http://localhost:9101/health >/dev/null 2>&1 && log "  → SERVING" || warn "  → not reachable"
-
-    log ""
-    log "  Attestor Prometheus metrics (:9101/metrics) — sample:"
-    curl -sf http://localhost:9101/metrics 2>/dev/null \
-      | grep -E "^(ibc_attest|go_goroutines)" | head -10 \
-      || warn "  Attestor metrics not yet available"
+    log "  Attestor (EVM watcher) — container UP"
+    log "    gRPC RPC server: attestor:9101 (used by proof-api)"
+    log "    HTTP health server: attestor:9102 (probing common paths…)"
+    local p code health_path=""
+    for p in "/healthz" "/health" "/live" "/ready" "/"; do
+      code=$(curl_in_net -s -o /dev/null -w "%{http_code}" "http://attestor:9102${p}" 2>/dev/null) || code=""
+      if [[ "$code" =~ ^2 ]]; then
+        health_path="$p"
+        log "    → SERVING at attestor:9102${p} ($code)"
+        break
+      fi
+    done
+    [[ -z "$health_path" ]] && warn "    no 2xx on /, /healthz, /health, /live, /ready — image may not expose HTTP health"
   fi
 
   log ""
@@ -450,7 +465,9 @@ demo_observability() {
   fi
 
   log ""
-  log "  Grafana / alerting: wire :9100 and :9101 into your Prometheus scrape config"
+  log "  To browse metrics from your host: publish the ports in docker-compose.yml,"
+  log "  e.g. add 'ports: [\"9100:9100\"]' to relayer, then visit http://localhost:9100/metrics."
+  log "  Grafana / alerting: wire relayer:9100 + attestor:9102 into your Prometheus scrape config."
   log "╚═════════════════════════════════════════════════════════════════════════╝"
 }
 
