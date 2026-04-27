@@ -186,9 +186,9 @@ cmd_demo() {
     transfer)   demo_cosmos_to_evm_transfer; demo_evm_to_cosmos_transfer ;;
     cosmos-evm) demo_cosmos_to_evm_transfer ;;
     evm-cosmos) demo_evm_to_cosmos_transfer ;;
-    track)      demo_track_packet_status ;;
-    failure)    demo_failure_and_retry ;;
-    observe)    demo_observability ;;
+    #track)      demo_track_packet_status ;;
+    #failure)    demo_failure_and_retry ;;
+    #observe)    demo_observability ;;
     all)        demo_all ;;
     *)
       echo "Usage: $0 demo [transfer|cosmos-evm|evm-cosmos|track|failure|observe|all]"

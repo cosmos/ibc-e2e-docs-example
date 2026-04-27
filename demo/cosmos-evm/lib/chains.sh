@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # Phase 1-3: chain initialisation, boot, readiness.
 
-# Apply a jq program to cosmos-data/config/genesis.json.
+# Apply a jq program to genesis.json directly on the host. The cosmos
+# /data/config/ directory is bind-mounted from ./cosmos/local/config/ (see
+# docker-compose.yml), so wfchaind init / add-genesis-account /
+# collect-gentxs and these jq patches all write through to the same file —
+# no volume roundtrip needed.
 # Usage: patch_cosmos_genesis <prog.jq> [extra jq args...]
 patch_cosmos_genesis() {
   local prog="$1"; shift
-  local tmp; tmp=$(mktemp)
-  local patched="${tmp}.patched"
-  vol_cp_from "$COSMOS_HOME/config/genesis.json" "$tmp"
-  jq "$@" -f "$prog" "$tmp" > "$patched"
-  vol_cp_to "$patched" "$COSMOS_HOME/config/genesis.json"
-  rm -f "$tmp" "$patched"
+  local genesis="$COSMOS_CFG_DIR/local/config/genesis.json"
+  local patched; patched=$(mktemp)
+  jq "$@" -f "$prog" "$genesis" > "$patched"
+  mv "$patched" "$genesis"
 }
 
 init_cosmos() {
   log "Initialising Cosmos chain ($COSMOS_CHAIN_ID)..."
+
+  # Pre-create the host config dir so the directory bind-mount in
+  # docker-compose.yml resolves cleanly. wfchaind init writes its default
+  # genesis.json / app.toml / config.toml / *_key.json files directly into
+  # this directory; we then overwrite app.toml / config.toml with our
+  # customized versions and apply jq patches to genesis.json.
+  mkdir -p "$COSMOS_CFG_DIR/local/config"
 
   # Idempotency guard — re-running add-genesis-account / gentx fails.
   if run_in cosmos "$COSMOS_BINARY" keys show validator \
@@ -67,8 +76,11 @@ init_cosmos() {
     --chain-id "$COSMOS_CHAIN_ID" --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null
   run_in cosmos "$COSMOS_BINARY" genesis collect-gentxs --home "$COSMOS_HOME" 2>/dev/null
 
-  vol_cp_to "$COSMOS_CFG_DIR/app.toml"    "$COSMOS_HOME/config/app.toml"
-  vol_cp_to "$COSMOS_CFG_DIR/config.toml" "$COSMOS_HOME/config/config.toml"
+  # Override init's default app.toml/config.toml with the customized versions
+  # in ./cosmos/. Host-side cp because /data/config/ is bind-mounted from
+  # ./cosmos/local/config/.
+  cp "$COSMOS_CFG_DIR/app.toml"    "$COSMOS_CFG_DIR/local/config/app.toml"
+  cp "$COSMOS_CFG_DIR/config.toml" "$COSMOS_CFG_DIR/local/config/config.toml"
 
   log "Cosmos init done"
   log "  validator: $validator_addr  ($COSMOS_VALIDATOR_BALANCE)"
@@ -252,11 +264,12 @@ clean() {
     "$EVM_DIR/cl-genesis-debug.json" \
     "$EVM_DIR/mnemonics.yaml" \
     "$EVM_DIR/keystores" \
+    "$COSMOS_CFG_DIR/local" \
     "$IBC_DIR/local" \
     "$IBC_DIR/cw_ics08_wasm_eth.wasm" \
     "$IBC_DIR/state.env" \
-    "$IBC_DIR"/solidity-ibc-eureka-* \
-    "$IBC_DIR"/ibc-relayer-*
+    #"$IBC_DIR"/solidity-ibc-eureka-* \
+    #"$IBC_DIR"/ibc-relayer-*
 
   log "Clean done"
 }

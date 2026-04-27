@@ -53,56 +53,30 @@ run_in() {
 #   - tx doesn't commit within 60s
 # On success: echoes the committed tx JSON (caller can pipe to jq for events).
 cosmos_tx_and_wait() {
-  local out json_line hash res code raw_log
-  local max=60 step=3 elapsed=0
+  local max=60 step=3 elapsed=0 out hash res code
 
   out=$(run_in cosmos "$COSMOS_BINARY" "$@" \
         --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
         --keyring-backend test --home "$COSMOS_HOME" \
         --gas auto --gas-adjustment 1.4 --gas-prices 0.025uatom \
         --yes --output json 2>&1) \
-    || die "cosmos tx broadcast failed. output:"$'\n'"$(echo "$out" | head -10)"
+    || die "cosmos tx broadcast failed. output:"$'\n'"$(head -10 <<<"$out")"
 
-  # docker compose run mixes "Container … Creating/Created" status lines into
-  # the captured output. Pick out the actual JSON line (starts with `{`) so jq
-  # doesn't choke on the status noise.
-  json_line=$(echo "$out" | grep -E '^\{' | tail -1 || echo "")
-  hash=$(echo "$json_line" | jq -r '.txhash // empty' 2>/dev/null || echo "")
-  [[ -n "$hash" ]] || die "no txhash in tx output. raw output:"$'\n'"$(echo "$out" | head -10)"
+  hash=$(grep -E '^\{' <<<"$out" | tail -1 | jq -r '.txhash // empty' 2>/dev/null) || hash=""
+  [[ -n "$hash" ]] || die "no txhash in tx output. raw output:"$'\n'"$(head -10 <<<"$out")"
 
   while (( elapsed < max )); do
     res=$(curl -sf "http://localhost:1317/cosmos/tx/v1beta1/txs/${hash}" 2>/dev/null) || res=""
     if [[ -n "$res" ]]; then
-      code=$(echo "$res" | jq -r '.tx_response.code // 0' 2>/dev/null || echo "0")
-      if [[ "$code" != "0" ]]; then
-        raw_log=$(echo "$res" | jq -r '.tx_response.raw_log // "(no log)"' 2>/dev/null || echo "(parse error)")
-        die "tx $hash committed with code=$code: $raw_log"
-      fi
+      code=$(jq -r '.tx_response.code // 0' <<<"$res" 2>/dev/null) || code=0
+      [[ "$code" == "0" ]] || \
+        die "tx $hash committed with code=$code: $(jq -r '.tx_response.raw_log // "(no log)"' <<<"$res" 2>/dev/null)"
       echo "$res"
       return 0
     fi
     sleep "$step"; (( elapsed += step ))
   done
   die "tx $hash did not commit within ${max}s — check: docker compose logs cosmos"
-}
-
-# Copy a file into/out of the cosmos-data volume via a stopped container.
-# The cosmos image has no shell/cp, so `docker cp` is the only option.
-vol_cp_to() {
-  local src="$1" dest="$2" cid
-  cid=$(docker create \
-    -v "${COMPOSE_PROJECT}_cosmos-data:/data" \
-    --entrypoint="" "$COSMOS_IMAGE" "$COSMOS_BINARY" version 2>/dev/null)
-  docker cp "$src" "${cid}:${dest}"
-  docker rm "$cid" >/dev/null 2>&1
-}
-vol_cp_from() {
-  local src="$1" dest="$2" cid
-  cid=$(docker create \
-    -v "${COMPOSE_PROJECT}_cosmos-data:/data" \
-    --entrypoint="" "$COSMOS_IMAGE" "$COSMOS_BINARY" version 2>/dev/null)
-  docker cp "${cid}:${src}" "$dest"
-  docker rm "$cid" >/dev/null 2>&1
 }
 
 # Foundry cast inside the compose network.

@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 # User-story demos: transfers, tracking, failure/retry, observability.
 
+# ERC20.balanceOf(address) → decimal string. Direct JSON-RPC eth_call via
+# curl — symmetric with how Cosmos balances are read, and ~100× faster than
+# `cast_in_net call …` in tight polling loops because there's no foundry
+# container spawn per iteration.
+# Echoes "0" if the call fails or the address has no bytecode.
+evm_erc20_balance() {
+  local contract="$1" addr="$2"
+  local padded="000000000000000000000000${addr#0x}"
+  local hex
+  hex=$(curl -sf -X POST http://localhost:8545 \
+        -H 'Content-Type: application/json' \
+        -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"$contract\",\"data\":\"0x70a08231${padded}\"},\"latest\"],\"id\":1}" 2>/dev/null \
+        | jq -r '.result // empty' 2>/dev/null) || hex=""
+  [[ -n "$hex" && "$hex" != "null" ]] || { echo "0"; return; }
+  printf '%d\n' "$hex" 2>/dev/null || echo "0"
+}
+
 # Snapshot bank + ERC20 balances; results in _SNAP_COSMOS_BAL / _SNAP_EVM_BAL.
 # Args: <label> <c_addr> <c_denom> <c_side> <e_contract> <e_addr> <e_side> <e_denom_display> [c_prev] [e_prev]
 snapshot_transfer_balances() {
@@ -24,8 +41,7 @@ snapshot_transfer_balances() {
 
   if [[ "$e_contract" =~ ^0x[0-9a-fA-F]{40}$ && \
         "$e_contract" != "0x0000000000000000000000000000000000000000" ]]; then
-    _SNAP_EVM_BAL=$(cast_in_net call "$e_contract" "balanceOf(address)(uint256)" "$e_addr" \
-      --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || _SNAP_EVM_BAL="0"
+    _SNAP_EVM_BAL=$(evm_erc20_balance "$e_contract" "$e_addr")
     if [[ -n "$e_prev" ]]; then
       log "  ${e_side} (${e_denom}): $_SNAP_EVM_BAL  (was $e_prev)"
     else
@@ -119,6 +135,22 @@ wait_for_cosmos_relay() {
   return 1
 }
 
+# Print copy-pasteable curl commands so the user can re-query balances on
+# both sides from their own shell — Cosmos REST + Besu JSON-RPC eth_call.
+# Args: <cosmos_addr> <cosmos_denom> <evm_erc20> <evm_addr>
+print_balance_curl_cmds() {
+  local cosmos_addr="$1" cosmos_denom="$2" evm_erc20="$3" evm_addr="$4"
+  log "  ── Re-query balances ────────────────────────────────────────────────"
+  log "  Cosmos (bank REST):"
+  log "    curl -s 'http://localhost:1317/cosmos/bank/v1beta1/balances/${cosmos_addr}/by_denom?denom=${cosmos_denom}' | jq .balance"
+  if [[ -n "$evm_erc20" ]]; then
+    # ERC20.balanceOf(address) calldata: selector 0x70a08231 || left-padded 32-byte address.
+    local padded="000000000000000000000000${evm_addr#0x}"
+    log "  EVM (ERC20.balanceOf via eth_call; result is hex, pipe to printf for decimal):"
+    log "    curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_call\",\"params\":[{\"to\":\"${evm_erc20}\",\"data\":\"0x70a08231${padded}\"},\"latest\"],\"id\":1}' | jq -r .result | xargs printf '%d' \\n"
+  fi
+}
+
 demo_cosmos_to_evm_transfer() {
   log "╔══ Demo: Cosmos → EVM IFT transfer ══════════════════════════════════════╗"
 
@@ -162,6 +194,7 @@ demo_cosmos_to_evm_transfer() {
     "$sender" "$denom" "Cosmos sender  " \
     "$erc20" "$DEMO_ETH_RECIPIENT" "EVM receiver  " "$path"
   local c_before="$_SNAP_COSMOS_BAL" e_before="$_SNAP_EVM_BAL"
+  print_balance_curl_cmds "$sender" "$denom" "$erc20" "$DEMO_ETH_RECIPIENT"
 
   local timeout_ts=$(( $(date +%s) + 600 ))
   local tx_out
@@ -204,8 +237,7 @@ demo_cosmos_to_evm_transfer() {
     [[ -z "$erc20" ]] && erc20=$(resolve_ibc_erc20_addr "$path" || echo "")
     if [[ -n "$erc20" ]]; then
       local e_now
-      e_now=$(cast_in_net call "$erc20" "balanceOf(address)(uint256)" "$DEMO_ETH_RECIPIENT" \
-        --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || e_now="$e_before"
+      e_now=$(evm_erc20_balance "$erc20" "$DEMO_ETH_RECIPIENT")
       if [[ "$e_now" != "$e_before" ]]; then
         log "  EVM balance changed at ${elapsed}s — relay complete in $(( $(date +%s) - start ))s"
         e_before="$e_now"; relayed=1; break
@@ -255,6 +287,7 @@ demo_evm_to_cosmos_transfer() {
     "$receiver" "$COSMOS_IFT_DENOM" "Cosmos receiver" \
     "$IFT_CONTRACT_ADDR" "$ETH_VALIDATOR_ADDR" "EVM sender    " "$COSMOS_IFT_DENOM"
   local c_before="$_SNAP_COSMOS_BAL" e_before="$_SNAP_EVM_BAL"
+  print_balance_curl_cmds "$receiver" "$COSMOS_IFT_DENOM" "$IFT_CONTRACT_ADDR" "$ETH_VALIDATOR_ADDR"
 
   # TestIFT.iftTransfer(string clientId, string receiver, uint256 amount, uint64 timeoutTimestamp)
   # Burns on EVM, wraps payload via CosmosIFTSendCallConstructor, calls
@@ -306,7 +339,12 @@ demo_track_packet_status() {
   log "  chain_id : $chain_id"
   log "  Relayer API (gRPC) : relayer:3000 → skip.relayer.RelayerApiService/Status"
 
+  # EVM→Cosmos relays wait on Ethereum beacon finality (~2 epochs even on this
+  # devnet) before the 08-wasm LC will accept the proof, so they routinely
+  # take 2-3 minutes. Cosmos→EVM uses AttestationLightClient (no finality
+  # wait) and usually settles in under 30s.
   local max=120 step=5 elapsed=0
+  [[ "$chain_id" == "$ETH_CHAIN_ID" ]] && max=300
   while true; do
     local status_json
     status_json=$(grpc_call \

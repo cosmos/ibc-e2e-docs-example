@@ -21,6 +21,7 @@ services:
     volumes:
       - cosmos-data:/data
       - ./cosmos:/cosmos-config:ro
+      - ./cosmos/local/config:/data/config
     networks:
       - ibc-net
     restart: on-failure
@@ -111,9 +112,6 @@ services:
       - relayer-data:/relayer
     networks:
       - ibc-net
-    # relayer uses ibcv2_proof_api (proof-api gRPC) + postgres + cosmos + besu.
-    # proof-api transitively pulls in attestor, so packet delivery is usable
-    # as soon as the relayer's depends_on resolve.
     depends_on:
       postgres:
         condition: service_healthy
@@ -171,7 +169,7 @@ services:
   # ── Proof API (attestation aggregator) ────────────────────────────────────
   # Wraps the attestor services behind a gRPC interface the relayer can call
   # to fetch attestations for both directions. Configured in fully attested
-  # mode — no SP1 ZK proof generation in this demo.
+  # mode
   proof-api:
     image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}
     container_name: ibc-proof-api
