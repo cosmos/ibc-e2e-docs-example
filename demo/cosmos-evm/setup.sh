@@ -93,7 +93,7 @@ SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-}"
 # through GMP on port "gmpport";
 # Pin to a specific tag once main stabilises an ICS27-aware release.
 SOLIDITY_IBC_TAG="${SOLIDITY_IBC_TAG:-main}"
-DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/E2ETestDeploy.s.sol}"
+DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/MinimalDeploy.s.sol}"
 ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
 # AttestationLightClient on EVM — replaces SP1ICS07Tendermint. Deployed by
 # create_evm_ibc_client; pre-set to skip that phase if you already have one

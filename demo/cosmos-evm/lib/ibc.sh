@@ -33,7 +33,7 @@ fetch_solidity_ibc() {
 }
 
 # Helper used by deploy_ibc_contracts + deploy_ift_contracts: look up a
-# contract address by label in E2ETestDeploy's returned JSON
+# contract address by label in MinimalDeploy's returned JSON
 # (`.returns."0".value` is a JSON-encoded string mapping labels like
 # "ics26Router", "ics27Gmp", "ift", "erc20" to addresses).
 # Robust against reordering or new proxies being added.
@@ -52,7 +52,7 @@ _forge_return_addr() {
 }
 
 # ─── Phase 4A ────────────────────────────────────────────────────────────────
-# Run `forge script E2ETestDeploy` on Besu to deploy ICS26Router + ICS27GMP +
+# Run `forge script MinimalDeploy` on Besu to deploy ICS26Router + ICS27GMP +
 # TestIFT. Idempotent: skips if router has bytecode at the recorded address.
 deploy_ibc_contracts() {
   if [[ -n "$ICS26_ROUTER_ADDR" ]]; then
@@ -75,6 +75,14 @@ deploy_ibc_contracts() {
 
   mkdir -p "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules}
   chmod 0777 "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules} 2>/dev/null || true
+
+  # Stage any committed forge scripts from ibc/scripts/ into the fetched
+  # source tree's scripts/ dir. Lets users add custom DEPLOY_SCRIPT options
+  # (e.g. scripts/MinimalDeploy.s.sol) without editing the gitignored
+  # solidity-ibc-eureka checkout. Idempotent — runs every deploy.
+  if compgen -G "$IBC_DIR/scripts/*.s.sol" > /dev/null; then
+    cp -f "$IBC_DIR/scripts"/*.s.sol "$SOLIDITY_IBC_DIR/scripts/"
+  fi
 
   if [[ -z "$(ls -A "$SOLIDITY_IBC_DIR/node_modules" 2>/dev/null)" ]]; then
     log "Installing contract dependencies (bun install)..."
@@ -127,7 +135,7 @@ deploy_ift_contracts() {
       && log "  (using legacy 'erc20' label — this tag lacks TestIFT)"
   fi
   [[ -n "$IFT_CONTRACT_ADDR" ]] || \
-    die "Neither 'ift' nor 'erc20' label in E2ETestDeploy returns"
+    die "Neither 'ift' nor 'erc20' label in MinimalDeploy returns"
   log "IFT token resolved: $IFT_CONTRACT_ADDR"
   echo "IFT_CONTRACT_ADDR=$IFT_CONTRACT_ADDR" >> "$IBC_STATE_FILE"
 }
@@ -786,7 +794,7 @@ mint_ift_tokens() {
 #   1. Ask wfchaind for the ICA address the Cosmos GMP module will use to
 #      sign MsgIFTMint when a packet arrives from the EVM TestIFT proxy.
 #   2. Deploy CosmosIFTSendCallConstructor from compiled bytecode, wiring the
-#      ICA + type URL + denom into it (E2ETestDeploy skipped this contract
+#      ICA + type URL + denom into it (MinimalDeploy skipped this contract
 #      because IFT_ICA_ADDRESS wasn't known at forge-deploy time).
 #   3. Call TestIFT.registerIFTBridge(clientId, icaAddress, constructor) so
 #      TestIFT.iftTransfer can wrap iftTransfer → ICS27GMP.sendCall with a

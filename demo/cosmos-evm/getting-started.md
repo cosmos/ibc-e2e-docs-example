@@ -94,7 +94,7 @@ of the chain's app.
 
 ### On EVM: Solidity contracts on Besu
 
-These get deployed by `forge script E2ETestDeploy` in Phase 4A, with one
+These get deployed by `forge script MinimalDeploy` in Phase 4A, with one
 exception (`AttestationLightClient`) that's deployed standalone in Phase
 4E3 because its constructor needs runtime values (current Cosmos
 height/timestamp).
