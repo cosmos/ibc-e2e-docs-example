@@ -272,14 +272,19 @@ directory per chain/domain.
 demo/cosmos-evm/
   setup.sh                  — CLI + config; sources lib/
   lib/
-    common.sh               — logging, docker helpers, render_template, cast_in_net,
-                              grpc_call, cosmos_tx_and_wait (poll-until-commit + raw_log on fail)
-    chains.sh               — init_cosmos, init_ethereum, wait_for_services, print_status, clean
-    ibc.sh                  — Phase 4: contract deploy, client create, IFT bridges,
-                              register_evm_ift_bridge (ICA + CosmosIFTSendCallConstructor
-                              deploy + TestIFT.registerIFTBridge), mint_ift_tokens
-    demo.sh                 — user-story demonstrations (IFT transfers in both directions
-                              via tx ift transfer / TestIFT.iftTransfer)
+    common.sh               — logging, docker helpers (cast_in_net, grpc_call, curl_in_net,
+                              run_in), render_template, cosmos_tx_and_wait (poll-until-commit
+                              + raw_log on fail), state_set (in-place key replace in state.env)
+    chains.sh               — init_cosmos, init_ethereum, wait_for_services, print_status,
+                              clean, _ensure_host_owns_cosmos_local (Linux bind-mount fix)
+    ibc.sh                  — Phase 4: contract deploy (forge script — DEPLOY_SCRIPT-overridable),
+                              client create, IFT bridges, register_evm_ift_bridge (ICA +
+                              CosmosIFTSendCallConstructor deploy + TestIFT.registerIFTBridge),
+                              mint_ift_tokens
+    demo.sh                 — user-story demonstrations (IFT transfers in both directions via
+                              tx ift transfer / TestIFT.iftTransfer); evm_erc20_balance (curl-
+                              based eth_call, replaces per-iteration cast container spawns);
+                              print_balance_curl_cmds (copy-pasteable curls for the user)
 
   cosmos/                   — Cosmos chain inputs
     app.toml, config.toml   — canonical wfchain / CometBFT config; cp'd to
@@ -310,6 +315,14 @@ demo/cosmos-evm/
     attestor-cosmos-config.toml.tmpl — rendered to ibc/local/attestor-cosmos-config.toml  (Cosmos watcher)
     relayer-keys.json.tmpl           — rendered to ibc/local/keys.json
     client-state.json.tmpl, consensus-state.json.tmpl — attestation LC create-client inputs
+    scripts/                  — committed forge scripts (auto-copied into the fetched source
+                                tree by deploy_ibc_contracts before forge runs).
+                                Drop a custom *.s.sol here and override DEPLOY_SCRIPT to use it.
+      MinimalDeploy.s.sol     — minimal IFT stack (AccessManager + ICS26Router + ICS27GMP +
+                                TestIFT). Drop-in alternative to upstream E2ETestDeploy.s.sol;
+                                skips ICS20Transfer / SP1 verifiers / TestERC20 since this
+                                demo doesn't use them. Use via:
+                                  DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol ./setup.sh ibc
     state.env                 — persisted addresses + IDs, built up by state_set appends (gitignored)
     local/                    — rendered configs the services actually read (gitignored)
     solidity-ibc-eureka-<tag>/, ibc-relayer-<tag>/ — downloaded sources (gitignored)
@@ -477,7 +490,7 @@ sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
 | 2 | `start_services` | `lib/chains.sh` | `docker compose up -d cosmos teku` (Besu already running) |
 | 3 | `wait_for_services` | `lib/chains.sh` | Poll cosmos status + teku sync endpoint |
 | 4A0 | `fetch_solidity_ibc` | `lib/ibc.sh` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`) |
-| 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | `forge script MinimalDeploy` — deploys ICS26Router, **ICS27GMP**, **TestIFT**. Registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
+| 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
 | 4A1 | `deploy_ift_contracts` | `lib/ibc.sh` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
 | 4B0 | `fetch_ethereum_lc_wasm` | `lib/ibc.sh` | Extract `cw_ics08_wasm_eth.wasm` from the downloaded source tarball |
 | 4B | `store_ethereum_lc` | `lib/ibc.sh` | Compute SHA-256 of the LC wasm (it was already embedded in Cosmos genesis in Phase 1A) |
@@ -493,12 +506,12 @@ sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
 | 4E2 | `start_proof_api` | `lib/ibc.sh` | `docker compose up -d proof-api` (attested mode in both directions) |
 | 4E3 | `create_evm_ibc_client` | `lib/ibc.sh` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)` (merklePrefix MUST be `[0x]` length 1 — see code comment) |
 | 4F | `wait_for_ibc_ready` | `lib/ibc.sh` | Poll Cosmos REST `/ibc/core/client/v1/client_states` for any `attestations-*` client |
-| 4F1 | `wait_for_evm_client` | `lib/ibc.sh` | Poll `ICS26Router.getNextClientSeq()` until > 0; assumes `client-0` |
+| 4F1 | `wait_for_evm_client` | `lib/ibc.sh` | Poll `ICS26Router.getNextClientSeq()` until > 0; takes the most recently added client as `client-$((next_seq - 1))` (handles chains where addClient has been called more than once — earlier versions hardcoded `client-0` and silently picked the wrong client on partial-state re-runs) |
 | 4F2 | `register_counterparty` | `lib/ibc.sh` | Cosmos-side `add-counterparty attestations-N client-N` |
 | 4F3 | `register_ift_bridges` | `lib/ibc.sh` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT-checksummed> evm` (EIP-55 checksum is critical — wfchain x/ift does plain string compare against ICS27GMP's checksummed sender). Uses `cosmos_tx_and_wait` so each tx is poll-confirmed before the next fires. Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
 | 4F3a | `register_evm_ift_bridge` | `lib/ibc.sh` | (1) `wfchaind query gmp get-address <client> <TestIFT-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased — different casing produces a different ICA, silently breaking the mint). (2) `wfchaind query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)` via `cast --create` from compiled bytecode. (4) `TestIFT.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
 | 4F4 | `finalize_relayer_config` | `lib/ibc.sh` | Re-render `config.yml` now that both client IDs are known; restart relayer |
-| 4G | `demo_all` | `lib/demo.sh` | Runs `demo_cosmos_to_evm_transfer` (lazy-mints uift JIT if sender balance is short, then `tx ift transfer`) → `demo_evm_to_cosmos_transfer` (`cast send TestIFT iftTransfer`) → `demo_track_packet_status` → `demo_failure_and_retry` → `demo_observability` |
+| 4G | `demo_all` | `lib/demo.sh` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands (`print_balance_curl_cmds`) before broadcasting so you can re-query balances live. Direction-aware polling: cosmos→evm caps at 120s (AttestationLightClient — no finality wait); evm→cosmos caps at 300s (08-wasm LC waits Ethereum beacon finality). `demo_failure_and_retry` waits exactly until the packet's TTL has expired (precise wait based on `short_ts`, not a fixed 75s sleep). `demo_observability` probes relayer/attestor endpoints from inside `ibc-net` via `curl_in_net` since none of those ports are published on the host. |
 
 All on-chain Cosmos txs run through `cosmos_tx_and_wait` (in `lib/common.sh`)
 which polls `/cosmos/tx/v1beta1/txs/<hash>` until commit, surfaces the chain's

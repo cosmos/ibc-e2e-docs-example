@@ -52,6 +52,16 @@ Tokens that exist on this chain:
   validator as creator. Stored as a bare subdenom (just `uift`), not the
   full `factory/<creator>/uift` form some other chains use.
 
+The cosmos service has its **whole `/data/config/` directory bind-mounted
+from `./cosmos/local/config/`** on the host, so all the genesis/keys/etc
+files `wfchaind init` writes are visible to you on disk:
+`./cosmos/local/config/genesis.json`, `app.toml`, `config.toml`,
+`priv_validator_key.json`, etc. The jq patches that customize genesis
+(bond_denom → uatom, 08-wasm allowed client, IFT authority → validator)
+run directly against the host file — no `docker cp` roundtrip. Other
+runtime state (keyring, blockchain state) stays in the `cosmos-data`
+named volume.
+
 ### Chain B — Ethereum (Besu + Teku)
 
 A single-validator Ethereum devnet, but Ethereum needs **two** processes
@@ -94,10 +104,21 @@ of the chain's app.
 
 ### On EVM: Solidity contracts on Besu
 
-These get deployed by `forge script MinimalDeploy` in Phase 4A, with one
-exception (`AttestationLightClient`) that's deployed standalone in Phase
-4E3 because its constructor needs runtime values (current Cosmos
-height/timestamp).
+These get deployed by `forge script "$DEPLOY_SCRIPT"` in Phase 4A. The
+default script is upstream's `scripts/E2ETestDeploy.s.sol` (deploys the
+full IBC stack including ICS20Transfer + SP1 verifiers + TestERC20, even
+though this demo only uses three of the contracts it produces). A
+trimmed alternative is committed at
+[`ibc/scripts/MinimalDeploy.s.sol`](ibc/scripts/MinimalDeploy.s.sol) —
+deploys just the contracts this demo actually wires (AccessManager +
+ICS26Router + ICS27GMP + ICS27Account + TestIFT, ~half the gas). To use
+it, set `DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol` (any `*.s.sol` you
+drop into `ibc/scripts/` is auto-copied into the fetched source tree
+before forge runs).
+
+One contract is **not** in either deploy script: `AttestationLightClient`
+is deployed standalone in Phase 4E3 because its constructor needs
+runtime values (current Cosmos height/timestamp + attestor address).
 
 | Contract | Role |
 |----------|------|
@@ -202,6 +223,14 @@ clients.
 5. wf1...recipient now holds 1000000 uift on Cosmos.
 ```
 
+**Why EVM→Cosmos is slower (~2-3 min) than Cosmos→EVM (<30 s):** the
+Cosmos-side 08-wasm LC will only accept proofs at heights that
+Ethereum's beacon chain has *finalized* (~2 epochs even on this devnet
+with minimal preset). The Cosmos→EVM direction has no such wait —
+`AttestationLightClient` accepts state attestations at any height the
+attestors have signed. The demo's status tracker reflects this
+asymmetry: Cosmos→EVM polls for ≤120 s, EVM→Cosmos for ≤300 s.
+
 The two key addresses to keep separate in the EVM→Cosmos direction
 (easy to confuse, breaks minting silently if you swap them):
 
@@ -239,6 +268,12 @@ From this directory:
 
 # Stop containers and wipe data.
 ./setup.sh clean
+
+# Use the trimmed deploy script (drops unused upstream contracts):
+DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol ./setup.sh
+
+# Use a pre-deployed contract set (skips Phase 4A entirely):
+ICS26_ROUTER_ADDR=0x… ICS27_GMP_ADDR=0x… IFT_CONTRACT_ADDR=0x… ./setup.sh
 ```
 
 First run pulls ~14 docker images and downloads two source tarballs
@@ -260,7 +295,59 @@ compose plugin), `jq`, `curl`, `openssl`, `perl`, and `bash`.
 - [`ibc/`](ibc/) — config templates (rendered into `ibc/local/` at
   runtime) and downloaded source tarballs.
 
-If something breaks during setup, `logs/setup-YYYYMMDD-HHMMSS.log`
-captures the full stdout/stderr of the run. Live service logs are at
-`docker compose logs -f <service>` (e.g. `relayer`, `attestor-cosmos`,
-`proof-api`).
+## Inspecting balances yourself
+
+Each transfer demo prints copy-pasteable curl commands before
+broadcasting, so you can re-query balances on either side from another
+terminal while the demo polls:
+
+```bash
+# Cosmos (REST → JSON object {denom, amount}):
+curl -s 'http://localhost:1317/cosmos/bank/v1beta1/balances/<addr>/by_denom?denom=uift' | jq .balance
+
+# EVM (eth_call → hex result, piped through printf for decimal):
+curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"<TestIFT-addr>","data":"0x70a08231<padded-addr>"},"latest"],"id":1}' \
+  | jq -r .result | xargs printf '%d\n'
+```
+
+The Cosmos REST is straightforward; the EVM side is verbose because
+ERC20 balances live in contract storage, not at the top-level account
+state. `eth_getBalance` only returns *native ETH*, not ERC20 token
+balances — that's why the demo always uses `eth_call → balanceOf` for
+TestIFT/UIFT.
+
+---
+
+## Where things live (gitignored runtime artifacts)
+
+After a setup run, you'll find:
+
+| Path | Created by | Contents |
+|------|-----------|---------|
+| `cosmos/local/config/` | `wfchaind init` (bind-mounted) | genesis, app.toml, config.toml, priv_validator_key, etc |
+| `cosmos/local/ibc_*_state.json` | Phase 4B5b | rendered LC ClientState + ConsensusState |
+| `ibc/local/{config.yml,keys.json,relayer.json,attestor*.toml,.ibc-attestor/}` | Phase 4D/4D1/keystore generator | relayer + attestor + proof-api configs |
+| `ibc/state.env` | every phase via `state_set` | accumulated addresses + IDs (no duplicates — `state_set` does in-place key replace) |
+| `ibc/solidity-ibc-eureka-<tag>/` | Phase 4A0 | downloaded contract source (~50 MB) |
+| `ibc/cw_ics08_wasm_eth.wasm` | Phase 4B0 | Ethereum LC wasm extracted from the source tarball |
+| `evm/jwt.hex`, `evm/cl-genesis.ssz` | Phase 1B | Engine API JWT + Teku beacon genesis |
+
+`./setup.sh clean` removes all of these and wipes the docker volumes.
+
+---
+
+## Troubleshooting
+
+- **Setup logs**: `logs/setup-YYYYMMDD-HHMMSS.log` captures full
+  stdout/stderr of every run.
+- **Live service logs**: `docker compose logs -f <service>` (e.g.
+  `relayer`, `attestor-cosmos`, `proof-api`).
+- **State file**: `cat ibc/state.env` — every phase appends here, last
+  value of each key wins.
+- **Packet status via gRPC**: `docker run --rm --network cosmos-evm_ibc-net
+  fullstorydev/grpcurl:latest -plaintext -d '{"tx_hash":"<hash>","chain_id":"<id>"}'
+  relayer:3000 skip.relayer.RelayerApiService/Status` (replace `<hash>`
+  with `COSMOS_TO_EVM_TX_HASH` or `EVM_TO_COSMOS_TX_HASH` from `state.env`).
+- **Genesis on disk**: `cat cosmos/local/config/genesis.json | jq` — fully
+  visible since the cosmos service bind-mounts this dir.
