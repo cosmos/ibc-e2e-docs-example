@@ -6,8 +6,10 @@ wfchain's **IFT** (Interchain Fungible Token) module — a tokenfactory-backed
 mint/burn bridge that rides on top of **ICS27 GMP** (General Message Passing,
 port `gmpport`), not standard ICS20. **Attestation-based light clients secure
 both directions**: an `AttestationLightClient` on EVM verifies Cosmos state, and
-an `08-wasm` attestation LC on Cosmos verifies EVM state. A single attestor key
-signs for both watchers (one process per chain).
+an `08-wasm` attestation LC on Cosmos verifies EVM state. **Two attestor
+processes** run side-by-side — one watching each chain (the binary takes a
+singular `--chain-type` at startup) — sharing **one keystore** so they sign
+under the same registered attestor address.
 
 ---
 
@@ -19,8 +21,10 @@ on-chain. Skip to the one you need.
 ### 1. Services (Docker Compose)
 
 The eight long-running containers, their host ports, and which services must be
-healthy before each starts (`depends_on`). One attestor process per chain — the
-binary takes a singular `--chain-type` at startup.
+healthy before each starts (`depends_on`). The two attestor services
+(`attestor` for Besu, `attestor-cosmos` for Cosmos) each watch a single
+chain — the binary takes a singular `--chain-type` at startup, so multi-chain
+support requires multi-process. They share a keystore.
 
 ```mermaid
 graph LR
