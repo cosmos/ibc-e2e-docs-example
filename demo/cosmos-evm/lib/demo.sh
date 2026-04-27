@@ -213,7 +213,7 @@ demo_cosmos_to_evm_transfer() {
     return 0
   fi
   log "  tx hash: $COSMOS_TO_EVM_TX_HASH"
-  echo "COSMOS_TO_EVM_TX_HASH=$COSMOS_TO_EVM_TX_HASH" >> "$IBC_STATE_FILE"
+  state_set COSMOS_TO_EVM_TX_HASH "$COSMOS_TO_EVM_TX_HASH"
 
   submit_to_relayer "$COSMOS_TO_EVM_TX_HASH" "$COSMOS_CHAIN_ID"
 
@@ -307,7 +307,7 @@ demo_evm_to_cosmos_transfer() {
     return 0
   fi
   log "  tx hash: $EVM_TO_COSMOS_TX_HASH"
-  echo "EVM_TO_COSMOS_TX_HASH=$EVM_TO_COSMOS_TX_HASH" >> "$IBC_STATE_FILE"
+  state_set EVM_TO_COSMOS_TX_HASH "$EVM_TO_COSMOS_TX_HASH"
 
   submit_to_relayer "$EVM_TO_COSMOS_TX_HASH" "$ETH_CHAIN_ID"
   wait_for_cosmos_relay "$receiver" "$COSMOS_IFT_DENOM" "$c_before"
@@ -393,8 +393,18 @@ demo_failure_and_retry() {
   fi
 
   log "  Timeout transfer submitted (60s TTL) — tx: $tx_hash"
-  log "  Waiting 75s for packet timeout to expire on EVM..."
-  sleep 75
+  # Wait until the packet's TTL has clearly expired (5s buffer for clock
+  # skew + relayer poll cadence). Replaces a fixed 75s sleep that didn't
+  # account for tx broadcast taking ~5-15s — was paying for that twice.
+  local now wait_remaining
+  now=$(date +%s)
+  wait_remaining=$(( short_ts + 5 - now ))
+  if (( wait_remaining > 0 )); then
+    log "  Waiting ${wait_remaining}s for packet timeout to expire on EVM..."
+    sleep "$wait_remaining"
+  else
+    log "  Packet TTL already expired (broadcast took longer than 60s)"
+  fi
 
   log "  Resuming relayer — it will submit MsgTimeout, burning the escrowed tokens"
   docker compose unpause relayer 2>/dev/null || true

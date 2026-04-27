@@ -104,6 +104,19 @@ curl_in_net() {
     curlimages/curl:latest curl "$@"
 }
 
+# Persist KEY=VAL into $IBC_STATE_FILE, replacing any prior line for that
+# key. Replaces the bare `echo "FOO=$FOO" >> "$IBC_STATE_FILE"` pattern that
+# accumulated duplicate entries across re-runs (last value still won via
+# shell sourcing semantics, but the file grew unboundedly).
+state_set() {
+  local key="$1" val="$2"
+  if [[ -f "$IBC_STATE_FILE" ]]; then
+    grep -v "^${key}=" "$IBC_STATE_FILE" > "${IBC_STATE_FILE}.tmp" 2>/dev/null || true
+    mv "${IBC_STATE_FILE}.tmp" "$IBC_STATE_FILE"
+  fi
+  echo "${key}=${val}" >> "$IBC_STATE_FILE"
+}
+
 # Poll an EVM JSON-RPC endpoint until eth_blockNumber succeeds.
 wait_for_rpc() {
   local name="$1" url="$2" max=120 step=3 elapsed=0

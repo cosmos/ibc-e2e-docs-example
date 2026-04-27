@@ -112,10 +112,8 @@ deploy_ibc_contracts() {
   log "  ICS26Router (proxy)   : $ICS26_ROUTER_ADDR"
   log "  ICS27GMP (proxy)      : ${ICS27_GMP_ADDR:-<not present — using old tag without ICS27?>}"
 
-  {
-    echo "ICS26_ROUTER_ADDR=$ICS26_ROUTER_ADDR"
-    [[ -n "${ICS27_GMP_ADDR:-}" ]] && echo "ICS27_GMP_ADDR=$ICS27_GMP_ADDR"
-  } >> "$IBC_STATE_FILE"
+  state_set ICS26_ROUTER_ADDR "$ICS26_ROUTER_ADDR"
+  [[ -n "${ICS27_GMP_ADDR:-}" ]] && state_set ICS27_GMP_ADDR "$ICS27_GMP_ADDR"
 }
 
 # ─── Phase 4A1 ───────────────────────────────────────────────────────────────
@@ -137,7 +135,7 @@ deploy_ift_contracts() {
   [[ -n "$IFT_CONTRACT_ADDR" ]] || \
     die "Neither 'ift' nor 'erc20' label in MinimalDeploy returns"
   log "IFT token resolved: $IFT_CONTRACT_ADDR"
-  echo "IFT_CONTRACT_ADDR=$IFT_CONTRACT_ADDR" >> "$IBC_STATE_FILE"
+  state_set IFT_CONTRACT_ADDR "$IFT_CONTRACT_ADDR"
 }
 
 # ─── Phase 4B0 ───────────────────────────────────────────────────────────────
@@ -182,7 +180,7 @@ store_ethereum_lc() {
     die "ETHEREUM_LC_WASM_PATH must point to an existing file"
   WASM_CHECKSUM=$(openssl dgst -sha256 "$ETHEREUM_LC_WASM_PATH" | awk '{print $NF}')
   log "Ethereum LC wasm checksum: $WASM_CHECKSUM"
-  echo "WASM_CHECKSUM=$WASM_CHECKSUM" >> "$IBC_STATE_FILE"
+  state_set WASM_CHECKSUM "$WASM_CHECKSUM"
 }
 
 # ─── Phase 4C ────────────────────────────────────────────────────────────────
@@ -193,7 +191,7 @@ setup_relayer_key() {
   RELAYER_ADDR=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
     "$COSMOS_BINARY" keys show relayer -a --keyring-backend test --home "$COSMOS_HOME")
   log "Relayer wallet: $RELAYER_ADDR"
-  echo "RELAYER_ADDR=$RELAYER_ADDR" >> "$IBC_STATE_FILE"
+  state_set RELAYER_ADDR "$RELAYER_ADDR"
 
   # Relayer signs Cosmos txs from /relayer/cosmos-keys; copy the keyring across.
   log "Populating relayer cosmos keyring (relayer-data volume)..."
@@ -377,7 +375,7 @@ create_ibc_clients() {
     die "Failed to create attestation IBC client after ${max}s — check: docker compose logs cosmos"
 
   log "Attestation IBC client created: $COSMOS_WASM_CLIENT_ID"
-  echo "COSMOS_WASM_CLIENT_ID=$COSMOS_WASM_CLIENT_ID" >> "$IBC_STATE_FILE"
+  state_set COSMOS_WASM_CLIENT_ID "$COSMOS_WASM_CLIENT_ID"
 }
 
 # Helper used by generate_relayer_config: emits the counterparty_chains: YAML
@@ -598,10 +596,8 @@ create_evm_ibc_client() {
     warn "Could not verify $predicted — using predicted ID"
   fi
 
-  {
-    echo "EVM_COSMOS_CLIENT_ID=$EVM_COSMOS_CLIENT_ID"
-    echo "EVM_ATTESTATION_LC_ADDR=$lc_addr"
-  } >> "$IBC_STATE_FILE"
+  state_set EVM_COSMOS_CLIENT_ID "$EVM_COSMOS_CLIENT_ID"
+  state_set EVM_ATTESTATION_LC_ADDR "$lc_addr"
 }
 
 # ─── Phase 4F ────────────────────────────────────────────────────────────────
@@ -620,7 +616,7 @@ wait_for_ibc_ready() {
     if [[ -n "$cid" ]]; then
       COSMOS_WASM_CLIENT_ID="$cid"
       log "IBC attestation client ready: $COSMOS_WASM_CLIENT_ID"
-      echo "COSMOS_WASM_CLIENT_ID=$COSMOS_WASM_CLIENT_ID" >> "$IBC_STATE_FILE"
+      state_set COSMOS_WASM_CLIENT_ID "$COSMOS_WASM_CLIENT_ID"
       return 0
     fi
     (( elapsed += step ))
@@ -641,9 +637,12 @@ wait_for_evm_client() {
     next_seq=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getNextClientSeq()(uint256)" \
       --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || next_seq=0
     if [[ "$next_seq" =~ ^[0-9]+$ ]] && (( next_seq > 0 )); then
-      EVM_COSMOS_CLIENT_ID="client-0"
+      # getNextClientSeq returns the next-id-to-assign, so the most recently
+      # added client is one less. Hardcoding client-0 broke any chain where
+      # addClient had been called more than once (e.g. partial-state re-runs).
+      EVM_COSMOS_CLIENT_ID="client-$((next_seq - 1))"
       log "EVM Cosmos client ready: $EVM_COSMOS_CLIENT_ID"
-      echo "EVM_COSMOS_CLIENT_ID=$EVM_COSMOS_CLIENT_ID" >> "$IBC_STATE_FILE"
+      state_set EVM_COSMOS_CLIENT_ID "$EVM_COSMOS_CLIENT_ID"
       return 0
     fi
     (( elapsed += step ))
@@ -757,14 +756,14 @@ register_ift_bridges() {
   # because it needs the ICA address derived from ICS26Router + TestIFT proxy,
   # and then deploys the CosmosIFTSendCallConstructor parameterised with it.
 
-  echo "COSMOS_IFT_DENOM=$COSMOS_IFT_DENOM" >> "$IBC_STATE_FILE"
+  state_set COSMOS_IFT_DENOM "$COSMOS_IFT_DENOM"
 
   # Default the demo to transfer IFT instead of uatom. Persist so it survives
   # across invocations (`./setup.sh demo cosmos-evm` on a later run).
   local num="1000000"
   [[ "$DEMO_TRANSFER_AMOUNT" =~ ^([0-9]+) ]] && num="${BASH_REMATCH[1]}"
   DEMO_TRANSFER_AMOUNT="${num}${COSMOS_IFT_DENOM}"
-  echo "DEMO_TRANSFER_AMOUNT=$DEMO_TRANSFER_AMOUNT" >> "$IBC_STATE_FILE"
+  state_set DEMO_TRANSFER_AMOUNT "$DEMO_TRANSFER_AMOUNT"
   log "DEMO_TRANSFER_AMOUNT → $DEMO_TRANSFER_AMOUNT"
 }
 
@@ -910,11 +909,9 @@ register_evm_ift_bridge() {
   IFT_ICA_ADDRESS="$ica"
   IFT_CTOR_ADDR="$ctor_addr"
   COSMOS_IFT_MODULE_ADDR="$cosmos_ift_module"
-  {
-    echo "IFT_ICA_ADDRESS=$ica"
-    echo "IFT_CTOR_ADDR=$ctor_addr"
-    echo "COSMOS_IFT_MODULE_ADDR=$cosmos_ift_module"
-  } >> "$IBC_STATE_FILE"
+  state_set IFT_ICA_ADDRESS "$ica"
+  state_set IFT_CTOR_ADDR "$ctor_addr"
+  state_set COSMOS_IFT_MODULE_ADDR "$cosmos_ift_module"
   log "EVM IFT bridge registered"
 }
 

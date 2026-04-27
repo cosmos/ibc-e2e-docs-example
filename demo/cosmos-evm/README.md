@@ -217,7 +217,7 @@ files at each run — don't edit them by hand.
 
 | File | Rendered from | Contents |
 |------|---------------|----------|
-| `ibc/state.env` | `ibc/state.env.tmpl` | Persisted contract addresses and client IDs across runs |
+| `ibc/state.env` | (not rendered — built up via `state_set` appends from setup phases) | Persisted contract addresses and client IDs across runs |
 | `ibc/local/config.yml` | `ibc/relayer-config.yml.tmpl` | Relayer chain config (endpoints, client ID mappings) |
 | `ibc/local/relayer.json` | `ibc/proof-api.json.tmpl` | Proof API module config (attested mode in both directions, attestor endpoints) |
 | `ibc/local/attestor-config.toml` | `ibc/attestor-config.toml.tmpl` | EVM-watching attestor — Besu RPC and `ICS26Router` address |
@@ -306,8 +306,7 @@ demo/cosmos-evm/
     attestor-cosmos-config.toml.tmpl — rendered to ibc/local/attestor-cosmos-config.toml  (Cosmos watcher)
     relayer-keys.json.tmpl           — rendered to ibc/local/keys.json
     client-state.json.tmpl, consensus-state.json.tmpl — attestation LC create-client inputs
-    state.env.tmpl            — rendered to ibc/state.env
-    state.env                 — persisted addresses + IDs (gitignored)
+    state.env                 — persisted addresses + IDs, built up by state_set appends (gitignored)
     local/                    — rendered configs the services actually read (gitignored)
     solidity-ibc-eureka-<tag>/, ibc-relayer-<tag>/ — downloaded sources (gitignored)
     cw_ics08_wasm_eth.wasm    — extracted LC binary (gitignored)
