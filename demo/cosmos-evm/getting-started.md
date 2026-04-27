@@ -57,7 +57,7 @@ from `./cosmos/local/config/`** on the host, so all the genesis/keys/etc
 files `wfchaind init` writes are visible to you on disk:
 `./cosmos/local/config/genesis.json`, `app.toml`, `config.toml`,
 `priv_validator_key.json`, etc. The jq patches that customize genesis
-(bond_denom → uatom, 08-wasm allowed client, IFT authority → validator)
+(bond_denom → uatom, IFT authority → validator)
 run directly against the host file — no `docker cp` roundtrip. Other
 runtime state (keyring, blockchain state) stays in the `cosmos-data`
 named volume.
@@ -100,7 +100,7 @@ of the chain's app.
 | `ift` | **Interchain Fungible Token.** Wraps tokenfactory with bridge semantics: `register-bridge`, `transfer`, mint-on-receive. Authority is set to the validator at genesis (so `--from validator` works without a gov proposal). |
 | `27-gmp` | **General Message Passing** on port `gmpport`. Both directions of IFT route through here — IFT packets are *not* ICS-20. |
 | `26-router` (ibc-go IBC v2) | Packet router; dispatches inbound packets to the right app (here: GMP). |
-| `02-client` + `08-wasm` | The light client framework. The actual LC for EVM is a CosmWasm contract loaded at genesis (`cw_ics08_wasm_eth.wasm`) — it verifies attestor signatures over EVM state. |
+| `02-client` + `attestations` | The light client framework. The actual LC for EVM is a native module compiled into wfchaind — its `ClientState` verifies attestor signatures over EVM packet commitments. |
 
 ### On EVM: Solidity contracts on Besu
 
@@ -139,7 +139,7 @@ These are the docker-compose services beyond the chains themselves.
 
 | Service | Side | Role |
 |---------|------|------|
-| `attestor` | EVM watcher | Reads Besu state, signs attestations the **Cosmos** 08-wasm LC consumes. Used for EVM→Cosmos packets. |
+| `attestor` | EVM watcher | Reads Besu state, signs attestations the **Cosmos** attestations LC consumes. Used for EVM→Cosmos packets. |
 | `attestor-cosmos` | Cosmos watcher | Reads Cosmos state, signs attestations the **EVM** `AttestationLightClient` consumes. Used for Cosmos→EVM packets. |
 
 The `ibc-attestor` binary takes a singular `--chain-type` at startup —
@@ -213,8 +213,8 @@ clients.
 
 4. Relayer submits the tx to cosmos:26657
    ▼
-   IBC core verifies proof through the 08-wasm LC
-     └─ The wasm LC checks the attestor signatures
+   IBC core verifies proof through the attestations LC
+     └─ The attestations LC checks the attestor signatures
    IBC core dispatches to 27-gmp
      └─ Decodes the inner MsgIFTMint
      └─ The ICA (signer) is authorised, MsgIFTMint runs
@@ -224,7 +224,7 @@ clients.
 ```
 
 **Why EVM→Cosmos is slower (~2-3 min) than Cosmos→EVM (<30 s):** the
-Cosmos-side 08-wasm LC will only accept proofs at heights that
+Cosmos-side attestations LC will only accept proofs at heights that
 Ethereum's beacon chain has *finalized* (~2 epochs even on this devnet
 with minimal preset). The Cosmos→EVM direction has no such wait —
 `AttestationLightClient` accepts state attestations at any height the
@@ -330,7 +330,6 @@ After a setup run, you'll find:
 | `ibc/local/{config.yml,keys.json,relayer.json,attestor*.toml,.ibc-attestor/}` | Phase 4D/4D1/keystore generator | relayer + attestor + proof-api configs |
 | `ibc/state.env` | every phase via `state_set` | accumulated addresses + IDs (no duplicates — `state_set` does in-place key replace) |
 | `ibc/solidity-ibc-eureka-<tag>/` | Phase 4A0 | downloaded contract source (~50 MB) |
-| `ibc/cw_ics08_wasm_eth.wasm` | Phase 4B0 | Ethereum LC wasm extracted from the source tarball |
 | `evm/jwt.hex`, `evm/cl-genesis.ssz` | Phase 1B | Engine API JWT + Teku beacon genesis |
 
 `./setup.sh clean` removes all of these and wipes the docker volumes.

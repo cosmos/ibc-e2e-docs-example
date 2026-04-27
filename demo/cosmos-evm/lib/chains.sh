@@ -70,23 +70,9 @@ init_cosmos() {
   # Patch bond_denom etc. BEFORE gentx so the stake denom validates correctly.
   # Also override IFT module authority to the validator so `tx ift register-bridge`
   # works with --from validator (default authority is the gov module account).
-  log "Patching Cosmos genesis (bond_denom → uatom, 08-wasm allowed, ift authority → validator)..."
+  log "Patching Cosmos genesis (bond_denom → uatom, ift authority → validator)..."
   patch_cosmos_genesis "$COSMOS_CFG_DIR/patch-genesis.jq" \
     --arg validator_addr "$validator_addr"
-
-  # Embed Ethereum LC wasm directly in genesis — available from block 0.
-  if [[ -n "$ETHEREUM_LC_WASM_PATH" ]]; then
-    [[ -f "$ETHEREUM_LC_WASM_PATH" ]] || die "ETHEREUM_LC_WASM_PATH='$ETHEREUM_LC_WASM_PATH' not found"
-    log "Injecting Ethereum LC wasm into genesis..."
-    local wasm_abs wasm_b64 wasm_hash_b64
-    wasm_abs="$(cd "$(dirname "$ETHEREUM_LC_WASM_PATH")" && pwd)/$(basename "$ETHEREUM_LC_WASM_PATH")"
-    wasm_b64=$(base64 < "$wasm_abs" | tr -d '\n')
-    wasm_hash_b64=$(openssl dgst -sha256 -binary "$wasm_abs" | base64 | tr -d '\n')
-    WASM_CHECKSUM=$(openssl dgst -sha256 "$wasm_abs" | awk '{print $NF}')
-    patch_cosmos_genesis "$COSMOS_CFG_DIR/inject-wasm-lc.jq" \
-      --arg code "$wasm_b64" --arg hash "$wasm_hash_b64"
-    log "Ethereum LC wasm injected — checksum: $WASM_CHECKSUM"
-  fi
 
   run_in cosmos "$COSMOS_BINARY" genesis gentx validator "$COSMOS_VALIDATOR_STAKE" \
     --chain-id "$COSMOS_CHAIN_ID" --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null
@@ -285,7 +271,6 @@ clean() {
     "$EVM_DIR/keystores" \
     "$COSMOS_CFG_DIR/local" \
     "$IBC_DIR/local" \
-    "$IBC_DIR/cw_ics08_wasm_eth.wasm" \
     "$IBC_DIR/state.env" \
     #"$IBC_DIR"/solidity-ibc-eureka-* \
     #"$IBC_DIR"/ibc-relayer-*

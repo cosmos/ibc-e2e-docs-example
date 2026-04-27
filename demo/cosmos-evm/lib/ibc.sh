@@ -138,51 +138,6 @@ deploy_ift_contracts() {
   state_set IFT_CONTRACT_ADDR "$IFT_CONTRACT_ADDR"
 }
 
-# ─── Phase 4B0 ───────────────────────────────────────────────────────────────
-# Extract cw_ics08_wasm_eth.wasm from the already-fetched solidity-ibc-eureka
-# source tarball.
-fetch_ethereum_lc_wasm() {
-  if [[ -n "$WASM_CHECKSUM" ]]; then
-    log "WASM_CHECKSUM already provided — skipping wasm fetch"
-    return 0
-  fi
-  if [[ -n "$ETHEREUM_LC_WASM_PATH" ]]; then
-    [[ -f "$ETHEREUM_LC_WASM_PATH" ]] || die "ETHEREUM_LC_WASM_PATH='$ETHEREUM_LC_WASM_PATH' not found"
-    log "Using existing ETHEREUM_LC_WASM_PATH: $ETHEREUM_LC_WASM_PATH"
-    return 0
-  fi
-
-  local dest="$IBC_DIR/cw_ics08_wasm_eth.wasm"
-  if [[ -f "$dest" ]]; then
-    log "cw_ics08_wasm_eth.wasm already extracted — reusing"
-    ETHEREUM_LC_WASM_PATH="$dest"
-    return 0
-  fi
-
-  [[ -n "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR not set — run fetch_solidity_ibc first"
-  local gz="$SOLIDITY_IBC_DIR/e2e/interchaintestv8/wasm/cw_ics08_wasm_eth.wasm.gz"
-  [[ -f "$gz" ]] || die "Wasm not found: $gz"
-  log "Extracting cw_ics08_wasm_eth.wasm from source tarball..."
-  gunzip -c "$gz" > "$dest"
-  ETHEREUM_LC_WASM_PATH="$dest"
-  log "cw_ics08_wasm_eth.wasm ready at $ETHEREUM_LC_WASM_PATH"
-}
-
-# ─── Phase 4B ────────────────────────────────────────────────────────────────
-# Compute SHA-256 of the LC wasm into WASM_CHECKSUM. The wasm itself was
-# already embedded into Cosmos genesis in Phase 1A; here we just record it.
-store_ethereum_lc() {
-  if [[ -n "$WASM_CHECKSUM" ]]; then
-    log "Ethereum LC wasm checksum: $WASM_CHECKSUM"
-    return 0
-  fi
-  [[ -n "$ETHEREUM_LC_WASM_PATH" && -f "$ETHEREUM_LC_WASM_PATH" ]] || \
-    die "ETHEREUM_LC_WASM_PATH must point to an existing file"
-  WASM_CHECKSUM=$(openssl dgst -sha256 "$ETHEREUM_LC_WASM_PATH" | awk '{print $NF}')
-  log "Ethereum LC wasm checksum: $WASM_CHECKSUM"
-  state_set WASM_CHECKSUM "$WASM_CHECKSUM"
-}
-
 # ─── Phase 4C ────────────────────────────────────────────────────────────────
 # Read the relayer's bech32 address; copy the cosmos keyring-test directory
 # into the relayer-data named volume so the relayer can sign Cosmos txs.
@@ -469,8 +424,9 @@ run_db_migrations() {
 start_relayer()  { log "Starting IBC relayer ($OPERATOR_IMAGE)..."; docker compose up -d relayer; }
 
 # ─── Phase 4E1 ───────────────────────────────────────────────────────────────
-# Start the EVM-watcher attestor. Its attestations advance the 08-wasm LC
-# on Cosmos. Re-renders config (idempotent) and ensures the keystore exists.
+# Start the EVM-watcher attestor. Its attestations advance the
+# attestations LC on Cosmos. Re-renders config (idempotent) and ensures
+# the keystore exists.
 start_attestor() {
   log "Starting IBC attestor — EVM watcher ($ATTESTOR_IMAGE)..."
   generate_attestor_config
@@ -944,8 +900,6 @@ setup_ibc() {
   run_phase "Phase 4A0: Fetch solidity-ibc-eureka source" fetch_solidity_ibc
   run_phase "Phase 4A:  Deploy IBC contracts on Besu"     deploy_ibc_contracts
   run_phase "Phase 4A1: Resolve IFT ERC20 address"        deploy_ift_contracts
-  run_phase "Phase 4B0: Fetch ethereum-lc.wasm"           fetch_ethereum_lc_wasm
-  run_phase "Phase 4B:  Resolve Ethereum LC checksum"     store_ethereum_lc
   run_phase "Phase 4C:  Resolve relayer wallet"           setup_relayer_key
   run_phase "Phase 4B5: Reconcile IBC client pair"        reconcile_ibc_client_pair
   run_phase "Phase 4B5: Create attestation IBC client"    create_ibc_clients
@@ -998,8 +952,7 @@ setup_ibc() {
   info " AttestationLightClient (EVM-side Cosmos LC) : ${EVM_ATTESTATION_LC_ADDR:-<not found>}"
   info " IFT ERC20            : ${IFT_CONTRACT_ADDR:-<not deployed>}"
   info " Cosmos IFT denom     : ${COSMOS_IFT_DENOM:-<not set>}"
-  info " Wasm checksum        : $WASM_CHECKSUM"
-  info " Cosmos wasm client   : ${COSMOS_WASM_CLIENT_ID:-<none>}"
+  info " Cosmos attestations LC : ${COSMOS_WASM_CLIENT_ID:-<none>}"
   info " EVM Cosmos client    : ${EVM_COSMOS_CLIENT_ID:-<none>}"
   info " Relayer logs         : docker compose logs -f relayer"
   info " Attestor logs        : docker compose logs -f attestor"

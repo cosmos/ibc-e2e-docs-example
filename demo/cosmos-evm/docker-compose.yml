@@ -127,7 +127,7 @@ services:
 
   # ── IBC Attestor (EVM watcher) ────────────────────────────────────────────
   # Watches Besu (EVM) for IBC events. Attestations advance the EVM light
-  # client (08-wasm) on Cosmos. One process per chain — the binary takes a
+  # client (attestations LC) on Cosmos. One process per chain — the binary takes a
   # singular --chain-type at startup, so a second service watches Cosmos.
   attestor:
     image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}

@@ -19,11 +19,9 @@
 #   templates/      — config templates (rendered via render_template)
 #
 # Environment (optional):
-#   SOLIDITY_IBC_DIR       — local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
-#   ETHEREUM_LC_WASM_PATH  — path to ethereum-lc.wasm; otherwise extracted from tarball
-#   ICS26_ROUTER_ADDR — skip forge deploy
+#   SOLIDITY_IBC_DIR        — local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
+#   ICS26_ROUTER_ADDR       — skip forge deploy
 #   EVM_ATTESTATION_LC_ADDR — skip AttestationLightClient deploy
-#   WASM_CHECKSUM          — skip wasm fetch
 #
 # Requirements: docker (compose plugin), jq, curl, openssl
 
@@ -99,8 +97,6 @@ ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
 # create_evm_ibc_client; pre-set to skip that phase if you already have one
 # wired up to ICS26Router.
 EVM_ATTESTATION_LC_ADDR="${EVM_ATTESTATION_LC_ADDR:-}"
-ETHEREUM_LC_WASM_PATH="${ETHEREUM_LC_WASM_PATH:-}"
-WASM_CHECKSUM="${WASM_CHECKSUM:-}"
 
 # Demo transfer
 DEMO_ETH_RECIPIENT="${DEMO_ETH_RECIPIENT:-$ETH_VALIDATOR_ADDR}"

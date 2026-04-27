@@ -340,9 +340,9 @@ demo_track_packet_status() {
   log "  Relayer API (gRPC) : relayer:3000 → skip.relayer.RelayerApiService/Status"
 
   # EVM→Cosmos relays wait on Ethereum beacon finality (~2 epochs even on this
-  # devnet) before the 08-wasm LC will accept the proof, so they routinely
-  # take 2-3 minutes. Cosmos→EVM uses AttestationLightClient (no finality
-  # wait) and usually settles in under 30s.
+  # devnet) before the Cosmos-side attestations LC will accept the proof, so
+  # they routinely take 2-3 minutes. Cosmos→EVM uses AttestationLightClient on
+  # the EVM side (no finality wait) and usually settles in under 30s.
   local max=120 step=5 elapsed=0
   [[ "$chain_id" == "$ETH_CHAIN_ID" ]] && max=300
   while true; do
