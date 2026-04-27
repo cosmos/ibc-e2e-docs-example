@@ -1,13 +1,13 @@
 # IBC Demo: Cosmos (wfchain) ↔ Ethereum (Besu EL + Teku CL)
 #
-# Chain A — Cosmos:  single PoA validator, standard Cosmos SDK IBC
-# Chain B — Ethereum: single PoA validator
+# Chain A — Cosmos:   single CometBFT validator, standard Cosmos SDK IBC
+# Chain B — Ethereum: single PoS validator (Gasper, post-merge from block 0)
 #   • Besu  = execution layer (EVM, JSON-RPC, Engine API)
 #   • Teku  = consensus layer (beacon node + embedded validator client)
 
 services:
 
-  # ── Chain A: Cosmos (wfchain, 1 PoA validator) ───────────────────────────
+  # ── Chain A: Cosmos (wfchain, 1 CometBFT validator) ──────────────────────
   cosmos:
     image: ${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}
     user: root

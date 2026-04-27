@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 # Phase 1-3: chain initialisation, boot, readiness.
 
+# Reclaim host-user ownership of cosmos/local/. wfchaind runs as root inside
+# the container, so files it writes through the /data/config/ bind-mount end
+# up root-owned on the host. macOS Docker Desktop transparently maps UIDs so
+# this is a no-op there; on Linux/CI runners the host user can't read those
+# files, and the host-side jq / cp that follow fail with EACCES (
+# `Permission denied` on patch-genesis.jq, in particular).
+# `[[ -O … ]]` short-circuits when ownership is already correct, so the
+# docker spin-up only fires on fresh Linux runs.
+_ensure_host_owns_cosmos_local() {
+  [[ -O "$COSMOS_CFG_DIR/local/config/genesis.json" ]] && return 0
+  docker run --rm --user 0 \
+    -v "$COSMOS_CFG_DIR/local:/local" \
+    busybox chown -R "$(id -u):$(id -g)" /local
+}
+
 # Apply a jq program to genesis.json directly on the host. The cosmos
 # /data/config/ directory is bind-mounted from ./cosmos/local/config/ (see
 # docker-compose.yml), so wfchaind init / add-genesis-account /
@@ -10,6 +25,7 @@
 patch_cosmos_genesis() {
   local prog="$1"; shift
   local genesis="$COSMOS_CFG_DIR/local/config/genesis.json"
+  _ensure_host_owns_cosmos_local
   local patched; patched=$(mktemp)
   jq "$@" -f "$prog" "$genesis" > "$patched"
   mv "$patched" "$genesis"
@@ -78,7 +94,10 @@ init_cosmos() {
 
   # Override init's default app.toml/config.toml with the customized versions
   # in ./cosmos/. Host-side cp because /data/config/ is bind-mounted from
-  # ./cosmos/local/config/.
+  # ./cosmos/local/config/. Reclaim ownership first — collect-gentxs above
+  # may have flipped genesis.json (and any sibling files it touches) back to
+  # root via tmpfile+rename, and cp -T over a root-owned dest fails on Linux.
+  _ensure_host_owns_cosmos_local
   cp "$COSMOS_CFG_DIR/app.toml"    "$COSMOS_CFG_DIR/local/config/app.toml"
   cp "$COSMOS_CFG_DIR/config.toml" "$COSMOS_CFG_DIR/local/config/config.toml"
 
