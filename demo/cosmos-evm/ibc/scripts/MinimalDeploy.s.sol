@@ -28,8 +28,13 @@ import { TestIFT } from "../test/solidity-ibc/mocks/TestIFT.sol";
 contract MinimalDeploy is Script {
     using stdJson for string;
 
-    string internal constant IFT_TOKEN_NAME   = "Test IFT";
-    string internal constant IFT_TOKEN_SYMBOL = "TIFT";
+    // Aligned with the Cosmos-side denom (`uift`, set in
+    // lib/ibc.sh::register_ift_bridges) so EVM wallets and Cosmos REST
+    // queries surface the same token under matching names. ERC20 ALL-CAPS
+    // convention is preserved on the symbol (UIFT vs uift); the descriptive
+    // name spells out the Cosmos linkage.
+    string internal constant IFT_TOKEN_NAME   = "Test uift";
+    string internal constant IFT_TOKEN_SYMBOL = "UIFT";
 
     struct Deployed {
         address ics26Router;

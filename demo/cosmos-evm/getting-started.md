@@ -20,7 +20,7 @@ trusts those signatures.
 ┌─────────────────────────────┐                ┌─────────────────────────────┐
 │  Chain A: Cosmos (wfchain)  │   ◄────────►   │  Chain B: Ethereum (Besu)   │
 │  CometBFT consensus         │  IBC v2 over   │  Besu (EL) + Teku (CL)      │
-│  uatom + uift tokens        │   attestation  │  TestIFT ERC20              │
+│  uatom + uift tokens        │   attestation  │  TestIFT ERC20 (UIFT/uift)  │
 └─────────────────────────────┘                └─────────────────────────────┘
 ```
 
@@ -105,7 +105,7 @@ height/timestamp).
 | `AttestationLightClient` | Verifies Cosmos state. Trusts an `m-of-n` attestor set; `verifyMembership` checks signatures over packet commitments. Replaces the SP1ICS07Tendermint contract used in earlier setups. |
 | `ICS27GMP` | The GMP app on port `gmpport`. Receives packets from `ICS26Router`, dispatches them to an Interchain Account. |
 | `ICS27Account` (CREATE2 proxy) | The Interchain Account itself — a per-(client, sender, salt) contract that executes the actual call on the EVM side. |
-| `TestIFT` | The ERC20-style IFT token. Has `iftTransfer` (outbound) and `iftMint` (called via the Interchain Account when a Cosmos→EVM packet arrives). |
+| `TestIFT` | The ERC20-style IFT token. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — same letters as the Cosmos `uift` denom so balances on both sides surface matching names. Has `iftTransfer` (outbound) and `iftMint` (called via the Interchain Account when a Cosmos→EVM packet arrives). |
 | `CosmosIFTSendCallConstructor` | Helper deployed once, baked with `(typeUrl, denom, ICA address)`. Encodes the `cosmostx` payload that EVM→Cosmos transfers send. |
 
 ---

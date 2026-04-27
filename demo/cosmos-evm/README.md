@@ -250,8 +250,8 @@ post-template additions:
 |-----|--------|---------|
 | `COSMOS_WASM_CLIENT_ID` | `create_ibc_clients` / `wait_for_ibc_ready` | `attestations-N` on Cosmos |
 | `EVM_COSMOS_CLIENT_ID` | `create_evm_ibc_client` / `wait_for_evm_client` | `client-N` on EVM |
-| `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | TestIFT proxy on EVM |
-| `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — wfchain's tokenfactory doesn't use `factory/…/…` in lookups) |
+| `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | TestIFT proxy on EVM. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — aligned with the Cosmos `uift` denom so balances on both sides show matching names |
+| `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — wfchain's tokenfactory doesn't use `factory/…/…` in lookups). Same logical token as EVM `UIFT` — the bridge maps them 1:1 |
 | `DEMO_TRANSFER_AMOUNT` | `register_ift_bridges` | rewritten to `<N>uift` so demos exercise IFT by default |
 | `IFT_ICA_ADDRESS` | `register_evm_ift_bridge` | ICA bech32 — MsgIFTMint signer on Cosmos side, baked into CosmosIFTSendCallConstructor |
 | `IFT_CTOR_ADDR` | `register_evm_ift_bridge` | Deployed `CosmosIFTSendCallConstructor` address |
