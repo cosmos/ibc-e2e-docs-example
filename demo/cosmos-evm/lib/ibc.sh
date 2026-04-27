@@ -159,34 +159,34 @@ setup_relayer_key() {
 }
 
 # ─── Phase 4B5a ──────────────────────────────────────────────────────────────
-# Verify persisted COSMOS_WASM_CLIENT_ID ↔ EVM_COSMOS_CLIENT_ID still match
+# Verify persisted COSMOS_CLIENT_ID ↔ EVM_CLIENT_ID still match
 # on-chain. Clears both on inconsistency so the next phase recreates them.
 reconcile_ibc_client_pair() {
-  if [[ -z "${COSMOS_WASM_CLIENT_ID:-}" || -z "${EVM_COSMOS_CLIENT_ID:-}" ]]; then
-    COSMOS_WASM_CLIENT_ID=""; EVM_COSMOS_CLIENT_ID=""
+  if [[ -z "${COSMOS_CLIENT_ID:-}" || -z "${EVM_CLIENT_ID:-}" ]]; then
+    COSMOS_CLIENT_ID=""; EVM_CLIENT_ID=""
     return 0
   fi
 
   local cosmos_cp
-  cosmos_cp=$(curl -sf "http://localhost:1317/ibc/core/client/v2/counterparty_info/${COSMOS_WASM_CLIENT_ID}" 2>/dev/null \
+  cosmos_cp=$(curl -sf "http://localhost:1317/ibc/core/client/v2/counterparty_info/${COSMOS_CLIENT_ID}" 2>/dev/null \
     | jq -r '.counterparty_info.client_id // empty' 2>/dev/null || echo "")
 
   local evm_cp
   evm_cp=$(cast_in_net call "$ICS26_ROUTER_ADDR" \
-    "getCounterparty(string)((string,bytes[]))" "$EVM_COSMOS_CLIENT_ID" \
+    "getCounterparty(string)((string,bytes[]))" "$EVM_CLIENT_ID" \
     --rpc-url "http://besu:8545" 2>/dev/null \
     | sed -n 's/^(//; s/,.*$//; s/"//g; 1p' \
     | tr -d '[:space:]') || evm_cp=""
 
-  if [[ "$cosmos_cp" == "$EVM_COSMOS_CLIENT_ID" && "$evm_cp" == "$COSMOS_WASM_CLIENT_ID" ]]; then
-    log "IBC client pair verified: $COSMOS_WASM_CLIENT_ID ↔ $EVM_COSMOS_CLIENT_ID"
+  if [[ "$cosmos_cp" == "$EVM_CLIENT_ID" && "$evm_cp" == "$COSMOS_CLIENT_ID" ]]; then
+    log "IBC client pair verified: $COSMOS_CLIENT_ID ↔ $EVM_CLIENT_ID"
     return 0
   fi
 
   warn "IBC client pair inconsistent — clearing stale IDs, will create fresh pair"
-  warn "  Cosmos: $COSMOS_WASM_CLIENT_ID.counterparty = '${cosmos_cp:-<unknown>}' (want: $EVM_COSMOS_CLIENT_ID)"
-  warn "  EVM:    $EVM_COSMOS_CLIENT_ID.counterparty = '${evm_cp:-<unknown>}' (want: $COSMOS_WASM_CLIENT_ID)"
-  COSMOS_WASM_CLIENT_ID=""; EVM_COSMOS_CLIENT_ID=""
+  warn "  Cosmos: $COSMOS_CLIENT_ID.counterparty = '${cosmos_cp:-<unknown>}' (want: $EVM_CLIENT_ID)"
+  warn "  EVM:    $EVM_CLIENT_ID.counterparty = '${evm_cp:-<unknown>}' (want: $COSMOS_CLIENT_ID)"
+  COSMOS_CLIENT_ID=""; EVM_CLIENT_ID=""
 }
 
 # Helper used by create_ibc_clients (and re-run by start_attestor): render
@@ -215,8 +215,8 @@ _ensure_attestor_keystore() {
 # Render ClientState + ConsensusState (attestor address, beacon slot/ts),
 # submit MsgCreateClient, poll REST until the attestations-N client appears.
 create_ibc_clients() {
-  if [[ -n "${COSMOS_WASM_CLIENT_ID:-}" ]]; then
-    log "IBC attestation client already known: $COSMOS_WASM_CLIENT_ID"
+  if [[ -n "${COSMOS_CLIENT_ID:-}" ]]; then
+    log "IBC attestation client already known: $COSMOS_CLIENT_ID"
     return 0
   fi
 
@@ -308,29 +308,29 @@ create_ibc_clients() {
           raw_log=$(echo "$tx_result" | jq -r '.tx_response.raw_log // "?"' 2>/dev/null || echo "(parse error)")
           die "MsgCreateClient committed with non-zero code=$tx_code: $raw_log"
         fi
-        COSMOS_WASM_CLIENT_ID=$(echo "$tx_result" | jq -r '
+        COSMOS_CLIENT_ID=$(echo "$tx_result" | jq -r '
           (
             (.tx_response.logs[0].events[]? | select(.type=="create_client") | .attributes[]? | select(.key=="client_id") | .value),
             (.tx_response.events[]? | select(.type=="create_client") | .attributes[]? | select(.key=="client_id") | .value)
           ) | first' 2>/dev/null | head -1 || echo "")
-        [[ -n "$COSMOS_WASM_CLIENT_ID" ]] && break
+        [[ -n "$COSMOS_CLIENT_ID" ]] && break
       fi
     fi
 
-    COSMOS_WASM_CLIENT_ID=$(curl -sf "http://localhost:1317/ibc/core/client/v1/client_states" 2>/dev/null \
+    COSMOS_CLIENT_ID=$(curl -sf "http://localhost:1317/ibc/core/client/v1/client_states" 2>/dev/null \
       | jq -r '.client_states[].client_id' 2>/dev/null \
       | grep "^attestations-" | tail -1 || echo "")
-    [[ -n "$COSMOS_WASM_CLIENT_ID" ]] && break
+    [[ -n "$COSMOS_CLIENT_ID" ]] && break
 
     sleep "$step"; (( elapsed += step ))
     echo -n "."
   done
 
-  [[ -n "${COSMOS_WASM_CLIENT_ID:-}" ]] || \
+  [[ -n "${COSMOS_CLIENT_ID:-}" ]] || \
     die "Failed to create attestation IBC client after ${max}s — check: docker compose logs cosmos"
 
-  log "Attestation IBC client created: $COSMOS_WASM_CLIENT_ID"
-  state_set COSMOS_WASM_CLIENT_ID "$COSMOS_WASM_CLIENT_ID"
+  log "Attestation IBC client created: $COSMOS_CLIENT_ID"
+  state_set COSMOS_CLIENT_ID "$COSMOS_CLIENT_ID"
 }
 
 # Helper used by generate_relayer_config: emits the counterparty_chains: YAML
@@ -362,8 +362,8 @@ generate_relayer_config() {
     render_template "$IBC_DIR/relayer-keys.json.tmpl" "$IBC_DIR/local/keys.json"
   log "Signing keys file written → $IBC_DIR/local/keys.json"
 
-  COSMOS_CP_BLOCK=$(_cp_block "${COSMOS_WASM_CLIENT_ID:-}" "$ETH_CHAIN_ID")
-  BESU_CP_BLOCK=$(_cp_block "${EVM_COSMOS_CLIENT_ID:-}" "$COSMOS_CHAIN_ID")
+  COSMOS_CP_BLOCK=$(_cp_block "${COSMOS_CLIENT_ID:-}" "$ETH_CHAIN_ID")
+  BESU_CP_BLOCK=$(_cp_block "${EVM_CLIENT_ID:-}" "$COSMOS_CHAIN_ID")
   export COSMOS_CP_BLOCK BESU_CP_BLOCK
   render_template "$IBC_DIR/relayer-config.yml.tmpl" "$IBC_DIR/local/config.yml"
 
@@ -467,10 +467,10 @@ start_proof_api() {
 # Read attestor address + Cosmos head height/timestamp, deploy
 # AttestationLightClient(attestors, quorum=1, initHeight, initTs,
 # roleManager=0x0) via `cast --create`, then call ICS26Router.addClient to
-# register it. Persists EVM_COSMOS_CLIENT_ID + EVM_ATTESTATION_LC_ADDR.
+# register it. Persists EVM_CLIENT_ID + EVM_ATTESTATION_LC_ADDR.
 create_evm_ibc_client() {
-  if [[ -n "${EVM_COSMOS_CLIENT_ID:-}" ]]; then
-    log "EVM Cosmos client already known: $EVM_COSMOS_CLIENT_ID"
+  if [[ -n "${EVM_CLIENT_ID:-}" ]]; then
+    log "EVM Cosmos client already known: $EVM_CLIENT_ID"
     return 0
   fi
 
@@ -536,7 +536,7 @@ create_evm_ibc_client() {
   local add_receipt add_status
   add_receipt=$(cast_in_net send "$ICS26_ROUTER_ADDR" \
     "addClient((string,bytes[]),address)" \
-    "($COSMOS_WASM_CLIENT_ID,[0x])" "$lc_addr" \
+    "($COSMOS_CLIENT_ID,[0x])" "$lc_addr" \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" --json 2>/dev/null) || add_receipt=""
   add_status=$(echo "$add_receipt" | jq -r '.status // empty' 2>/dev/null || echo "")
   [[ "$add_status" == "0x1" ]] || die "ICS26Router.addClient failed (status=$add_status)"
@@ -544,15 +544,15 @@ create_evm_ibc_client() {
   local verify_addr
   verify_addr=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getClient(string)(address)" "$predicted" \
     --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || verify_addr=""
-  EVM_COSMOS_CLIENT_ID="$predicted"
+  EVM_CLIENT_ID="$predicted"
   EVM_ATTESTATION_LC_ADDR="$lc_addr"
   if [[ -n "$verify_addr" && "$verify_addr" != "0x0000000000000000000000000000000000000000" ]]; then
-    log "EVM Cosmos client registered: $EVM_COSMOS_CLIENT_ID → $verify_addr"
+    log "EVM Cosmos client registered: $EVM_CLIENT_ID → $verify_addr"
   else
     warn "Could not verify $predicted — using predicted ID"
   fi
 
-  state_set EVM_COSMOS_CLIENT_ID "$EVM_COSMOS_CLIENT_ID"
+  state_set EVM_CLIENT_ID "$EVM_CLIENT_ID"
   state_set EVM_ATTESTATION_LC_ADDR "$lc_addr"
 }
 
@@ -560,7 +560,7 @@ create_evm_ibc_client() {
 # Poll Cosmos REST for any attestations-* client. Covers the case where the
 # relayer auto-creates it instead of create_ibc_clients.
 wait_for_ibc_ready() {
-  [[ -n "${COSMOS_WASM_CLIENT_ID:-}" ]] && { log "IBC attestation client: $COSMOS_WASM_CLIENT_ID"; return 0; }
+  [[ -n "${COSMOS_CLIENT_ID:-}" ]] && { log "IBC attestation client: $COSMOS_CLIENT_ID"; return 0; }
 
   local max=300 step=5 elapsed=0
   log "Waiting for attestation IBC client on Cosmos..."
@@ -570,9 +570,9 @@ wait_for_ibc_ready() {
       | jq -r '.client_states[].client_id' 2>/dev/null \
       | grep "^attestations-" | head -1 || true)
     if [[ -n "$cid" ]]; then
-      COSMOS_WASM_CLIENT_ID="$cid"
-      log "IBC attestation client ready: $COSMOS_WASM_CLIENT_ID"
-      state_set COSMOS_WASM_CLIENT_ID "$COSMOS_WASM_CLIENT_ID"
+      COSMOS_CLIENT_ID="$cid"
+      log "IBC attestation client ready: $COSMOS_CLIENT_ID"
+      state_set COSMOS_CLIENT_ID "$COSMOS_CLIENT_ID"
       return 0
     fi
     (( elapsed += step ))
@@ -584,7 +584,7 @@ wait_for_ibc_ready() {
 # ─── Phase 4F1 ───────────────────────────────────────────────────────────────
 # Poll ICS26Router.getNextClientSeq() until > 0 — assumes client-0.
 wait_for_evm_client() {
-  [[ -n "${EVM_COSMOS_CLIENT_ID:-}" ]] && { log "EVM Cosmos client: $EVM_COSMOS_CLIENT_ID"; return 0; }
+  [[ -n "${EVM_CLIENT_ID:-}" ]] && { log "EVM Cosmos client: $EVM_CLIENT_ID"; return 0; }
 
   local max=300 step=5 elapsed=0
   log "Waiting for Cosmos light client on EVM (ICS26Router)..."
@@ -596,15 +596,15 @@ wait_for_evm_client() {
       # getNextClientSeq returns the next-id-to-assign, so the most recently
       # added client is one less. Hardcoding client-0 broke any chain where
       # addClient had been called more than once (e.g. partial-state re-runs).
-      EVM_COSMOS_CLIENT_ID="client-$((next_seq - 1))"
-      log "EVM Cosmos client ready: $EVM_COSMOS_CLIENT_ID"
-      state_set EVM_COSMOS_CLIENT_ID "$EVM_COSMOS_CLIENT_ID"
+      EVM_CLIENT_ID="client-$((next_seq - 1))"
+      log "EVM Cosmos client ready: $EVM_CLIENT_ID"
+      state_set EVM_CLIENT_ID "$EVM_CLIENT_ID"
       return 0
     fi
     (( elapsed += step ))
     if (( elapsed >= max )); then
       warn "EVM Cosmos client not found within ${max}s"
-      warn "Set EVM_COSMOS_CLIENT_ID manually and re-run: ./setup.sh ibc"
+      warn "Set EVM_CLIENT_ID manually and re-run: ./setup.sh ibc"
       return 0
     fi
     sleep "$step"; echo -n "."
@@ -616,23 +616,23 @@ wait_for_evm_client() {
 # its EVM peer.
 register_counterparty() {
   log "Registering IBC counterparty on Cosmos..."
-  [[ -n "$COSMOS_WASM_CLIENT_ID" ]] || die "COSMOS_WASM_CLIENT_ID not set"
-  if [[ -z "$EVM_COSMOS_CLIENT_ID" ]]; then
-    warn "EVM_COSMOS_CLIENT_ID unknown — skipping add-counterparty"
+  [[ -n "$COSMOS_CLIENT_ID" ]] || die "COSMOS_CLIENT_ID not set"
+  if [[ -z "$EVM_CLIENT_ID" ]]; then
+    warn "EVM_CLIENT_ID unknown — skipping add-counterparty"
     return 0
   fi
 
   local existing
-  existing=$(curl -sf "http://localhost:1317/ibc/core/client/v2/counterparty_info/${COSMOS_WASM_CLIENT_ID}" 2>/dev/null \
+  existing=$(curl -sf "http://localhost:1317/ibc/core/client/v2/counterparty_info/${COSMOS_CLIENT_ID}" 2>/dev/null \
     | jq -r '.counterparty_info.client_id // empty' 2>/dev/null || true)
-  if [[ "$existing" == "$EVM_COSMOS_CLIENT_ID" ]]; then
-    log "  Counterparty already registered: $COSMOS_WASM_CLIENT_ID ↔ $EVM_COSMOS_CLIENT_ID"
+  if [[ "$existing" == "$EVM_CLIENT_ID" ]]; then
+    log "  Counterparty already registered: $COSMOS_CLIENT_ID ↔ $EVM_CLIENT_ID"
     return 0
   fi
 
-  log "  add-counterparty: $COSMOS_WASM_CLIENT_ID ↔ $EVM_COSMOS_CLIENT_ID"
+  log "  add-counterparty: $COSMOS_CLIENT_ID ↔ $EVM_CLIENT_ID"
   run_in cosmos "$COSMOS_BINARY" tx ibc client add-counterparty \
-    "$COSMOS_WASM_CLIENT_ID" "$EVM_COSMOS_CLIENT_ID" "" \
+    "$COSMOS_CLIENT_ID" "$EVM_CLIENT_ID" "" \
     --from relayer --keyring-backend test --home "$COSMOS_HOME" \
     --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
     --gas auto --gas-adjustment 1.4 --gas-prices 0.025uatom \
@@ -661,7 +661,7 @@ register_ift_bridges() {
 
   local existing_bridge
   existing_bridge=$(docker compose exec -T cosmos wfchaind query ift bridge \
-    "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" \
+    "$COSMOS_IFT_DENOM" "$COSMOS_CLIENT_ID" \
     --node tcp://localhost:26657 -o json 2>/dev/null \
     | jq -r '.bridge.counterparty_ift_address // empty' 2>/dev/null || echo "")
   
@@ -676,7 +676,7 @@ register_ift_bridges() {
     log "  expected: $ift_addr_checksum  (EIP-55 checksum)"
     log "  → removing and re-registering with the correct casing..."
     cosmos_tx_and_wait tx ift remove-bridge \
-      "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" \
+      "$COSMOS_IFT_DENOM" "$COSMOS_CLIENT_ID" \
       --from validator >/dev/null
     existing_bridge=""  # fall through to the registration block below
   fi
@@ -701,9 +701,9 @@ register_ift_bridges() {
 
     # tx ift register-bridge [denom] [client_id] [counterparty_ift_address] [ift_send_call_constructor]
     # constructor = "evm" for an EVM counterparty (vs. "cosmostx").
-    log "  Registering Cosmos IFT bridge (client=$COSMOS_WASM_CLIENT_ID → evm=$ift_addr_checksum)..."
+    log "  Registering Cosmos IFT bridge (client=$COSMOS_CLIENT_ID → evm=$ift_addr_checksum)..."
     cosmos_tx_and_wait tx ift register-bridge \
-      "$COSMOS_IFT_DENOM" "$COSMOS_WASM_CLIENT_ID" "$ift_addr_checksum" evm \
+      "$COSMOS_IFT_DENOM" "$COSMOS_CLIENT_ID" "$ift_addr_checksum" evm \
       --from validator >/dev/null
     log "Cosmos IFT bridge registered"
   fi
@@ -756,8 +756,8 @@ mint_ift_tokens() {
 #      correctly-signed MsgIFTMint payload.
 register_evm_ift_bridge() {
   [[ -n "$IFT_CONTRACT_ADDR" ]]      || { warn "IFT_CONTRACT_ADDR not set — skipping EVM IFT bridge"; return 0; }
-  [[ -n "$EVM_COSMOS_CLIENT_ID" ]]   || { warn "EVM_COSMOS_CLIENT_ID not set — skipping EVM IFT bridge"; return 0; }
-  [[ -n "$COSMOS_WASM_CLIENT_ID" ]]  || { warn "COSMOS_WASM_CLIENT_ID not set — skipping EVM IFT bridge"; return 0; }
+  [[ -n "$EVM_CLIENT_ID" ]]   || { warn "EVM_CLIENT_ID not set — skipping EVM IFT bridge"; return 0; }
+  [[ -n "$COSMOS_CLIENT_ID" ]]  || { warn "COSMOS_CLIENT_ID not set — skipping EVM IFT bridge"; return 0; }
   [[ -n "$COSMOS_IFT_DENOM" ]]       || { warn "COSMOS_IFT_DENOM not set — skipping EVM IFT bridge"; return 0; }
 
   # Compute the correct ICA up front (requires the EIP-55 checksummed EVM
@@ -777,10 +777,10 @@ register_evm_ift_bridge() {
     | tr -d '[:space:]') || ift_addr_checksum=""
   [[ -n "$ift_addr_checksum" ]] || ift_addr_checksum="$IFT_CONTRACT_ADDR"
 
-  log "  Computing ICA for (client=$COSMOS_WASM_CLIENT_ID, sender=$ift_addr_checksum)..."
+  log "  Computing ICA for (client=$COSMOS_CLIENT_ID, sender=$ift_addr_checksum)..."
   local ica
   ica=$(docker compose exec -T cosmos wfchaind query gmp get-address \
-    "$COSMOS_WASM_CLIENT_ID" "$ift_addr_checksum" "" -o json 2>/dev/null \
+    "$COSMOS_CLIENT_ID" "$ift_addr_checksum" "" -o json 2>/dev/null \
     | jq -r '.account_address // empty' 2>/dev/null) || ica=""
   [[ -n "$ica" ]] || { warn "Failed to compute ICA via 'query gmp get-address'"; return 0; }
   log "  ICA: $ica"
@@ -855,10 +855,10 @@ register_evm_ift_bridge() {
   #    the ICA here would pass the first two checks and then revert silently
   #    on the sender-match check, which manifests as "relay complete but
   #    EVM balance 0".
-  log "  TestIFT.registerIFTBridge(client=$EVM_COSMOS_CLIENT_ID, module=$cosmos_ift_module, ctor=$ctor_addr)..."
+  log "  TestIFT.registerIFTBridge(client=$EVM_CLIENT_ID, module=$cosmos_ift_module, ctor=$ctor_addr)..."
   cast_in_net send "$IFT_CONTRACT_ADDR" \
     "registerIFTBridge(string,string,address)" \
-    "$EVM_COSMOS_CLIENT_ID" "$cosmos_ift_module" "$ctor_addr" \
+    "$EVM_CLIENT_ID" "$cosmos_ift_module" "$ctor_addr" \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" 2>/dev/null \
     || die "TestIFT.registerIFTBridge failed — check authority / access control on TestIFT"
 
@@ -952,8 +952,8 @@ setup_ibc() {
   info " AttestationLightClient (EVM-side Cosmos LC) : ${EVM_ATTESTATION_LC_ADDR:-<not found>}"
   info " IFT ERC20            : ${IFT_CONTRACT_ADDR:-<not deployed>}"
   info " Cosmos IFT denom     : ${COSMOS_IFT_DENOM:-<not set>}"
-  info " Cosmos attestations LC : ${COSMOS_WASM_CLIENT_ID:-<none>}"
-  info " EVM Cosmos client    : ${EVM_COSMOS_CLIENT_ID:-<none>}"
+  info " Cosmos attestations LC : ${COSMOS_CLIENT_ID:-<none>}"
+  info " EVM Cosmos client    : ${EVM_CLIENT_ID:-<none>}"
   info " Relayer logs         : docker compose logs -f relayer"
   info " Attestor logs        : docker compose logs -f attestor"
   info " State file           : $IBC_STATE_FILE"

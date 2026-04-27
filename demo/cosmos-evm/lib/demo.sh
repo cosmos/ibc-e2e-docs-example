@@ -169,7 +169,7 @@ demo_cosmos_to_evm_transfer() {
   log "  from   : $sender (Cosmos)"
   log "  to     : $DEMO_ETH_RECIPIENT (EVM)"
   log "  denom  : $denom   amount: $amount"
-  log "  client : $COSMOS_WASM_CLIENT_ID"
+  log "  client : $COSMOS_CLIENT_ID"
 
   # Lazy mint: if transferring the IFT denom and the sender's balance is
   # short, mint just-in-time. Keeps setup free of auto-mints — tokens only
@@ -186,7 +186,7 @@ demo_cosmos_to_evm_transfer() {
 
   # For IFT-routed packets the balance lands in TestIFT (IFT_CONTRACT_ADDR);
   # resolve_ibc_erc20_addr returns it via the COSMOS_IFT_DENOM shortcut.
-  local path="transfer/${EVM_COSMOS_CLIENT_ID}/${denom}"
+  local path="transfer/${EVM_CLIENT_ID}/${denom}"
   local erc20
   erc20=$(resolve_ibc_erc20_addr "$path") || erc20=""
 
@@ -199,7 +199,7 @@ demo_cosmos_to_evm_transfer() {
   local timeout_ts=$(( $(date +%s) + 600 ))
   local tx_out
   tx_out=$(cosmos_ibc_transfer \
-    "$COSMOS_WASM_CLIENT_ID" "$DEMO_ETH_RECIPIENT" "$DEMO_TRANSFER_AMOUNT" "$timeout_ts") || tx_out=""
+    "$COSMOS_CLIENT_ID" "$DEMO_ETH_RECIPIENT" "$DEMO_TRANSFER_AMOUNT" "$timeout_ts") || tx_out=""
   if [[ -z "$tx_out" ]]; then
     warn "Failed to prepare/broadcast transfer tx — check: docker compose logs cosmos"
     log "╚═════════════════════════════════════════════════════════════════════════╝"
@@ -257,8 +257,8 @@ demo_cosmos_to_evm_transfer() {
 
 demo_evm_to_cosmos_transfer() {
   log "╔══ Demo: EVM → Cosmos IFT transfer ══════════════════════════════════════╗"
-  [[ -n "${EVM_COSMOS_CLIENT_ID:-}" ]] || {
-    warn "EVM_COSMOS_CLIENT_ID not set — run setup first"
+  [[ -n "${EVM_CLIENT_ID:-}" ]] || {
+    warn "EVM_CLIENT_ID not set — run setup first"
     log "╚═════════════════════════════════════════════════════════════════════════╝"; return 0; }
   [[ -n "${IFT_CONTRACT_ADDR:-}" ]] || {
     warn "IFT_CONTRACT_ADDR not set — run setup first"
@@ -281,7 +281,7 @@ demo_evm_to_cosmos_transfer() {
   log "  token  : TestIFT @ $IFT_CONTRACT_ADDR"
   log "  denom  : $COSMOS_IFT_DENOM"
   log "  amount : $amount"
-  log "  client : $EVM_COSMOS_CLIENT_ID"
+  log "  client : $EVM_CLIENT_ID"
 
   snapshot_transfer_balances "before" \
     "$receiver" "$COSMOS_IFT_DENOM" "Cosmos receiver" \
@@ -295,7 +295,7 @@ demo_evm_to_cosmos_transfer() {
   local tx_out
   tx_out=$(cast_in_net send "$IFT_CONTRACT_ADDR" \
     "iftTransfer(string,string,uint256,uint64)" \
-    "$EVM_COSMOS_CLIENT_ID" "$receiver" "$amount" "$timeout_ts" \
+    "$EVM_CLIENT_ID" "$receiver" "$amount" "$timeout_ts" \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" --json) || tx_out=""
 
   EVM_TO_COSMOS_TX_HASH=$(echo "$tx_out" | jq -r '.transactionHash // empty' 2>/dev/null || echo "")
@@ -381,7 +381,7 @@ demo_failure_and_retry() {
   local tx_out
   # Use the IFT denom so `tx ift transfer` finds a registered bridge;
   # `uatom` isn't IFT-registered and would be rejected before the timeout fires.
-  tx_out=$(cosmos_ibc_transfer "$COSMOS_WASM_CLIENT_ID" "$DEMO_ETH_RECIPIENT" "1${COSMOS_IFT_DENOM:-uatom}" "$short_ts") || tx_out=""
+  tx_out=$(cosmos_ibc_transfer "$COSMOS_CLIENT_ID" "$DEMO_ETH_RECIPIENT" "1${COSMOS_IFT_DENOM:-uatom}" "$short_ts") || tx_out=""
   local tx_hash
   tx_hash=$(echo "$tx_out" | jq -r '.txhash // empty' 2>/dev/null || echo "")
 

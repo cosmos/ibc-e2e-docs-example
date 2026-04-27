@@ -250,8 +250,8 @@ post-template additions:
 
 | Key | Set by | Meaning |
 |-----|--------|---------|
-| `COSMOS_WASM_CLIENT_ID` | `create_ibc_clients` / `wait_for_ibc_ready` | `attestations-N` on Cosmos |
-| `EVM_COSMOS_CLIENT_ID` | `create_evm_ibc_client` / `wait_for_evm_client` | `client-N` on EVM |
+| `COSMOS_CLIENT_ID` | `create_ibc_clients` / `wait_for_ibc_ready` | `attestations-N` on Cosmos |
+| `EVM_CLIENT_ID` | `create_evm_ibc_client` / `wait_for_evm_client` | `client-N` on EVM |
 | `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | TestIFT proxy on EVM. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — aligned with the Cosmos `uift` denom so balances on both sides show matching names |
 | `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — wfchain's tokenfactory doesn't use `factory/…/…` in lookups). Same logical token as EVM `UIFT` — the bridge maps them 1:1 |
 | `DEMO_TRANSFER_AMOUNT` | `register_ift_bridges` | rewritten to `<N>uift` so demos exercise IFT by default |
@@ -410,7 +410,7 @@ Any of these, if pre-set, skips the corresponding step — useful for an existin
 | `SOLIDITY_IBC_DIR` | GitHub tarball fetch — uses the provided checkout |
 | `ICS26_ROUTER_ADDR` (AND router has bytecode on-chain) | Forge deploy — uses pre-deployed addresses. `EVM_ATTESTATION_LC_ADDR` is NOT part of this gate because it's deployed by `create_evm_ibc_client` via `cast --create`, not by `MinimalDeploy`. The on-chain bytecode probe re-deploys if Besu's volume was wiped but state.env survived. |
 | `EVM_ATTESTATION_LC_ADDR` | `AttestationLightClient` deploy — uses an existing on-chain LC. Must be already registered with `ICS26Router.addClient`. |
-| `COSMOS_WASM_CLIENT_ID` / `EVM_COSMOS_CLIENT_ID` | Client creation — uses existing clients (validated by `reconcile_ibc_client_pair`) |
+| `COSMOS_CLIENT_ID` / `EVM_CLIENT_ID` | Client creation — uses existing clients (validated by `reconcile_ibc_client_pair`) |
 | `IFT_MINT_AMOUNT` (tunable, default `1000000000`) | Amount minted into the sender JIT when the Cosmos→EVM demo needs IFT balance |
 | `RELAYER_TX_FEE_AMOUNT` (tunable, default `20000`) | Flat fee (uatom) attached to every relayer-submitted tx on Cosmos — needs to clear `min-gas-prices × gas` |
 
@@ -467,8 +467,8 @@ To force recreation of the IBC client pair (e.g. after a merkle prefix misconfig
 remove the relevant lines from `state.env` before re-running:
 
 ```bash
-sed -i '' '/^COSMOS_WASM_CLIENT_ID=/d' ibc/state.env
-sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
+sed -i '' '/^COSMOS_CLIENT_ID=/d' ibc/state.env
+sed -i '' '/^EVM_CLIENT_ID=/d'  ibc/state.env
 ./setup.sh ibc
 ```
 
@@ -486,7 +486,7 @@ sed -i '' '/^EVM_COSMOS_CLIENT_ID=/d'  ibc/state.env
 | 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
 | 4A1 | `deploy_ift_contracts` | `lib/ibc.sh` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
 | 4C | `setup_relayer_key` | `lib/ibc.sh` | Resolve relayer bech32 address; copy Cosmos keyring into relayer-data volume |
-| 4B5a | `reconcile_ibc_client_pair` | `lib/ibc.sh` | Verify persisted `COSMOS_WASM_CLIENT_ID` ↔ `EVM_COSMOS_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |
+| 4B5a | `reconcile_ibc_client_pair` | `lib/ibc.sh` | Verify persisted `COSMOS_CLIENT_ID` ↔ `EVM_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |
 | 4B5b | `create_ibc_clients` | `lib/ibc.sh` | Submit `MsgCreateClient` with attestation ClientState (rendered to `cosmos/local/ibc_*_state.json`); poll for commit via REST indexer |
 | 4D | `generate_relayer_config` | `lib/ibc.sh` | Render `config.yml` + `keys.json` from templates (initial pass; finalized in 4F4 once both client IDs are known) |
 | 4D1 | `generate_proof_api_config` + attestor configs | `lib/ibc.sh` | Render `relayer.json`, `attestor-config.toml`, `attestor-cosmos-config.toml` BEFORE start_relayer — relayer depends_on proof-api → attestor + attestor-cosmos, all of which bind-mount these host files; missing files would make compose either create a directory at the mount path or crash-loop the attestors |

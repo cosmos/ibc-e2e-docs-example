@@ -113,8 +113,8 @@ IFT_CTOR_ADDR="${IFT_CTOR_ADDR:-}"
 
 # Runtime-set client IDs (populated by setup_ibc; left as sentinels so the
 # generate_relayer_config's ${VAR:-} expansion works before they're known).
-EVM_COSMOS_CLIENT_ID="${EVM_COSMOS_CLIENT_ID:-}"
-COSMOS_WASM_CLIENT_ID="${COSMOS_WASM_CLIENT_ID:-}"
+EVM_CLIENT_ID="${EVM_CLIENT_ID:-}"
+COSMOS_CLIENT_ID="${COSMOS_CLIENT_ID:-}"
 
 PROOF_API_GRPC_ADDR="${PROOF_API_GRPC_ADDR:-proof-api:9090}"
 # Flat fee (in COSMOS_DENOM) the relayer attaches to every IBC tx on Cosmos.
@@ -159,24 +159,24 @@ cmd_demo() {
     || die "State file not found — run './setup.sh ibc' first"
 
   # Resolve client IDs from the running chain if missing.
-  if [[ -z "${COSMOS_WASM_CLIENT_ID:-}" ]]; then
-    COSMOS_WASM_CLIENT_ID=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
+  if [[ -z "${COSMOS_CLIENT_ID:-}" ]]; then
+    COSMOS_CLIENT_ID=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
       wfchaind query ibc client states --home /data --node tcp://cosmos:26657 \
       --output json 2>/dev/null | jq -r '.client_states[].client_id' 2>/dev/null \
       | grep "^attestations-" | tail -1 || true)
-    [[ -n "$COSMOS_WASM_CLIENT_ID" ]] || die "COSMOS_WASM_CLIENT_ID unknown — run './setup.sh ibc' first"
-    echo "COSMOS_WASM_CLIENT_ID=$COSMOS_WASM_CLIENT_ID" >> "$IBC_STATE_FILE"
+    [[ -n "$COSMOS_CLIENT_ID" ]] || die "COSMOS_CLIENT_ID unknown — run './setup.sh ibc' first"
+    echo "COSMOS_CLIENT_ID=$COSMOS_CLIENT_ID" >> "$IBC_STATE_FILE"
   fi
-  if [[ -z "${EVM_COSMOS_CLIENT_ID:-}" ]]; then
+  if [[ -z "${EVM_CLIENT_ID:-}" ]]; then
     local next_seq
     next_seq=$(cast_in_net call "$ICS26_ROUTER_ADDR" "getNextClientSeq()(uint256)" \
       --rpc-url "http://besu:8545" 2>/dev/null | tr -d '[:space:]') || next_seq=0
     if [[ "$next_seq" =~ ^[0-9]+$ ]] && (( next_seq > 0 )); then
-      EVM_COSMOS_CLIENT_ID="client-$((next_seq - 1))"
-      echo "EVM_COSMOS_CLIENT_ID=$EVM_COSMOS_CLIENT_ID" >> "$IBC_STATE_FILE"
+      EVM_CLIENT_ID="client-$((next_seq - 1))"
+      echo "EVM_CLIENT_ID=$EVM_CLIENT_ID" >> "$IBC_STATE_FILE"
     fi
   fi
-  log "Cosmos client: ${COSMOS_WASM_CLIENT_ID}, EVM client: ${EVM_COSMOS_CLIENT_ID:-<unknown>}"
+  log "Cosmos client: ${COSMOS_CLIENT_ID}, EVM client: ${EVM_CLIENT_ID:-<unknown>}"
 
   case "${1:-all}" in
     transfer)   demo_cosmos_to_evm_transfer; demo_evm_to_cosmos_transfer ;;
