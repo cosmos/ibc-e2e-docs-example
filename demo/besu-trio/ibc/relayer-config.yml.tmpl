@@ -1,0 +1,79 @@
+# cosmos/ibc-relayer configuration — 3 EVM chains in a single relayer.
+# Rendered from relayer-config.yml.tmpl by lib/ibc.sh::generate_relayer_config.
+#
+# Variables:
+#   PROOF_API_GRPC_ADDR
+#   A_ICS26_ROUTER_ADDR, hub_ICS26_ROUTER_ADDR, B_ICS26_ROUTER_ADDR
+#   A_CP_BLOCK, HUB_CP_BLOCK, B_CP_BLOCK   (counterparty_chains: ... fragments)
+#
+# Each *_CP_BLOCK is built by lib/ibc.sh::_cp_block. Until BesuQBFTLightClient
+# IDs are known (i.e. before `./setup.sh wire`) each block renders as
+# `counterparty_chains: {}` — valid YAML; the relayer boots but has no clients
+# to drive yet.
+
+postgres:
+  hostname: postgres
+  port: "5432"
+  database: relayer
+
+signing:
+  keys_path: "/home/nonroot/config/local/keys.json"
+
+relayer_api:
+  address: "0.0.0.0:3000"
+
+metrics:
+  prometheus_address: "0.0.0.0:9100"
+
+ibcv2_proof_api:
+  grpc_address: "${PROOF_API_GRPC_ADDR}"
+  grpc_tls_enabled: false
+
+chains:
+  chain-a:
+    chain_name: chain-a
+    chain_id: "41001"
+    type: evm
+    environment: testnet
+    evm:
+      rpc: "http://besu-a:8545"
+      contracts:
+        ics_26_router_address: "${A_ICS26_ROUTER_ADDR}"
+        ics_20_transfer_address: "0x0000000000000000000000000000000000000000"
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      finality_offset: 0
+      ${A_CP_BLOCK}
+
+  chain-hub:
+    chain_name: chain-hub
+    chain_id: "41000"
+    type: evm
+    environment: testnet
+    evm:
+      rpc: "http://besu-hub:8545"
+      contracts:
+        ics_26_router_address: "${hub_ICS26_ROUTER_ADDR}"
+        ics_20_transfer_address: "0x0000000000000000000000000000000000000000"
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      finality_offset: 0
+      ${HUB_CP_BLOCK}
+
+  chain-b:
+    chain_name: chain-b
+    chain_id: "41002"
+    type: evm
+    environment: testnet
+    evm:
+      rpc: "http://besu-b:8545"
+      contracts:
+        ics_26_router_address: "${B_ICS26_ROUTER_ADDR}"
+        ics_20_transfer_address: "0x0000000000000000000000000000000000000000"
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      finality_offset: 0
+      ${B_CP_BLOCK}

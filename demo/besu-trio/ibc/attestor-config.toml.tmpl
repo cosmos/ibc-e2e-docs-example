@@ -1,0 +1,18 @@
+# ibc-attestor config — rendered from attestor-config.toml.tmpl by
+# lib/ibc.sh::render_ibc_configs, once per direction (4 total). Each render
+# sets ATTESTOR_NAME, ATTESTOR_RPC_URL, ATTESTOR_ROUTER_ADDR before invoking
+# render_template; output goes to ibc/local/attestor-${ATTESTOR_NAME}.toml.
+#
+# Variables: ATTESTOR_NAME, ATTESTOR_RPC_URL, ATTESTOR_ROUTER_ADDR.
+
+[server]
+listen_addr = "0.0.0.0:9101"
+health_addr = "0.0.0.0:9102"
+
+[adapter]
+url = "${ATTESTOR_RPC_URL}"
+router_address = "${ATTESTOR_ROUTER_ADDR}"
+finality_offset = 0
+
+[signer]
+keystore_path = "/config/keys/${ATTESTOR_NAME}/.ibc-attestor/ibc-attestor-keystore"
