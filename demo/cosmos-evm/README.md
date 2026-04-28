@@ -1,7 +1,7 @@
 # Cosmos ↔ EVM IBC Demo
 
 End-to-end demo of bidirectional IBC v2 token transfers between a Cosmos chain
-(`wfchain`) and an Ethereum devnet (Hyperledger Besu + Teku). Transfers use
+(`wfchain`) and an Ethereum devnet (Hyperledger Besu, single-validator QBFT). Transfers use
 wfchain's **IFT** (Interchain Fungible Token) module — a tokenfactory-backed
 mint/burn bridge that rides on top of **ICS27 GMP** (General Message Passing,
 port `gmpport`), not standard ICS20. **Attestation-based light clients secure
@@ -20,7 +20,7 @@ on-chain. Skip to the one you need.
 
 ### 1. Services (Docker Compose)
 
-The eight long-running containers, their host ports, and which services must be
+The seven long-running containers, their host ports, and which services must be
 healthy before each starts (`depends_on`). The two attestor services
 (`attestor` for Besu, `attestor-cosmos` for Cosmos) each watch a single
 chain — the binary takes a singular `--chain-type` at startup, so multi-chain
@@ -29,22 +29,18 @@ support requires multi-process. They share a keystore.
 ```mermaid
 graph LR
     cosmos[["cosmos<br/>:26657 RPC<br/>:1317 REST<br/>:9090 gRPC"]]
-    besu[["besu<br/>:8545 JSON-RPC<br/>:8546 WS<br/>:8551 Engine (int.)"]]
-    teku[["teku<br/>:5051 Beacon REST"]]
+    besu[["besu<br/>:8545 JSON-RPC<br/>:8546 WS"]]
     postgres[["postgres<br/>:5432 (int.)"]]
     attestor[["attestor<br/>(EVM watcher)<br/>:9101/9102 (int.)"]]
     attestorCosmos[["attestor-cosmos<br/>(Cosmos watcher)<br/>:9101/9102 (int.)"]]
     proofapi[["proof-api<br/>:9090 gRPC (int.)"]]
     relayer[["relayer<br/>:3000 API (int.)<br/>:9100 metrics (int.)"]]
 
-    teku -->|depends_on<br/>service_healthy| besu
     attestor -->|depends_on<br/>service_healthy| besu
     attestor --> cosmos
-    attestor --> teku
     attestorCosmos -->|depends_on<br/>service_healthy| cosmos
     proofapi -->|depends_on<br/>service_healthy| besu
     proofapi --> cosmos
-    proofapi --> teku
     proofapi -->|depends_on<br/>service_started| attestor
     proofapi -->|depends_on<br/>service_started| attestorCosmos
     relayer -->|depends_on<br/>service_healthy| postgres
@@ -114,8 +110,7 @@ graph LR
 | Service | Image | Ports | Role |
 |---------|-------|-------|------|
 | `cosmos` | `ghcr.io/cosmos/wfchain:latest` | 26657 RPC · 1317 REST · 9090 gRPC | Cosmos chain node |
-| `besu` | `hyperledger/besu:26.2.0` | 8545 JSON-RPC · 8546 WS | Ethereum execution layer |
-| `teku` | `consensys/teku:26.4` | 5051 Beacon REST | Ethereum consensus layer |
+| `besu` | `hyperledger/besu:26.2.0` | 8545 JSON-RPC · 8546 WS | Ethereum node — single-validator QBFT (no separate consensus layer) |
 | `relayer` | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | 3000 gRPC API · 9100 metrics | Bidirectional IBC packet relay |
 | `attestor` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Besu — signs EVM state attestations for the attestations LC on Cosmos |
 | `attestor-cosmos` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Cosmos — signs Cosmos state attestations for `AttestationLightClient` on EVM |
@@ -190,7 +185,6 @@ ICS27GMP.sendCall(…, payload) on port "gmpport"
 Relayer polls besu:8545, picks up SendPacket
 Proof API (eth_to_cosmos)
  ├─ fetches EVM packet commitment       → besu:8545
- ├─ fetches beacon finality             → teku:5051
  └─ queries attestor for signature      → attestor:9101
         │ Attestor reads EVM state      → besu:8545
         │ returns signed attestation
@@ -297,12 +291,10 @@ demo/cosmos-evm/
       ibc_client_state.json     — rendered from ibc/client-state.json.tmpl
       ibc_consensus_state.json  — rendered from ibc/consensus-state.json.tmpl
 
-  evm/                      — Besu + Teku inputs (mounted at /evm in both containers)
-    besu.toml, teku.toml    — static EL + CL service config
-    el-genesis.json         — static Besu execution-layer genesis
-    cl-config.yaml          — static Teku minimal network config
-    mnemonics.yaml.tmpl     — rendered into mnemonics.yaml during CL genesis generation
-    jwt.hex, cl-genesis.ssz — generated at first run (gitignored)
+  evm/                      — Besu inputs (mounted at /evm in the besu container)
+    besu.toml               — static Besu config (QBFT consensus, JSON-RPC, no CL/Engine API)
+    el-genesis.json         — static Besu genesis; QBFT validator address baked into extraData
+    key                     — Besu node private key; derives the sole QBFT validator address
 
   ibc/                      — IBC service inputs + runtime state
     relayer-config.yml.tmpl          — rendered to ibc/local/config.yml
@@ -340,13 +332,10 @@ All work happens inside Docker, so the host only needs the tools `setup.sh` shel
 |------|----------|
 | `docker` + Compose v2 plugin | All service containers + one-off image runs |
 | `jq` | JSON parsing (REST responses, forge broadcast artefacts, state files) |
-| `curl` | HTTP polling for readiness + Cosmos REST / beacon REST queries |
-| `openssl` | Random JWT secret for the Engine API |
+| `curl` | HTTP polling for readiness + Cosmos REST / EVM JSON-RPC queries |
 | `perl` | Logging — strips ANSI colour codes before writing to `logs/setup-*.log` |
 | `bash` | Shell (script uses `[[ ]]`, `(( ))`, process substitution) |
 | `base64`, `tar`, `gunzip`, `xxd`, `sed`, `awk`, `find` | Standard Unix utilities (bundled on macOS + Linux) |
-
-> **Platform note.** The default `ETH2_TESTNET_GENESIS_IMAGE` tag is `master-linux-arm64` — override `ETH2_TESTNET_GENESIS_IMAGE` for x86_64 hosts.
 
 ### Resources
 
@@ -364,7 +353,6 @@ All work happens inside Docker, so the host only needs the tools `setup.sh` shel
 | 9090 | cosmos | gRPC |
 | 26656 | cosmos | CometBFT P2P |
 | 26657 | cosmos | CometBFT RPC |
-| 5051 | teku   | Beacon REST |
 | 8545 | besu   | JSON-RPC |
 | 8546 | besu   | WebSocket |
 
@@ -377,10 +365,7 @@ All tags pin to `${VAR:-default}` in `setup.sh` — override any variable to use
 | Image | Variable | Purpose |
 |-------|----------|---------|
 | `ghcr.io/cosmos/wfchain:latest` | `COSMOS_IMAGE` | Cosmos chain node + CLI |
-| `hyperledger/besu:26.2.0` | `BESU_IMAGE` | Ethereum execution layer |
-| `consensys/teku:26.4` | `TEKU_IMAGE` | Ethereum consensus layer + validator client |
-| `protolambda/eth2-val-tools` | `ETH2_VAL_TOOLS_IMAGE` | Generates BLS validator keystores |
-| `ethpandaops/ethereum-genesis-generator:master-linux-arm64` | `ETH2_TESTNET_GENESIS_IMAGE` | Generates `cl-genesis.ssz` |
+| `hyperledger/besu:26.2.0` | `BESU_IMAGE` | Ethereum node — single-validator QBFT (no CL) |
 | `ghcr.io/foundry-rs/foundry:latest` | `FOUNDRY_IMAGE` | `forge script` deploy + `cast` calls |
 | `oven/bun:1` | `BUN_IMAGE` | `bun install` for solidity-ibc-eureka deps |
 | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | `OPERATOR_IMAGE` | IBC packet relayer |
@@ -418,11 +403,11 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 
 ### Files and volumes written
 
-- **Under `evm/`:** `jwt.hex`, `cl-genesis.ssz`, temporary `mnemonics.yaml` (removed after use)
+- **Under `evm/`:** `key` (Besu QBFT validator private key)
 - **Under `cosmos/`:** `local/config/{genesis.json,app.toml,config.toml,client.toml,node_key.json,priv_validator_key.json,…}`, `local/ibc_client_state.json`, `local/ibc_consensus_state.json` — bind-mounted directly into the cosmos container
 - **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `solidity-ibc-eureka-<tag>/`, `ibc-relayer-<tag>/`
 - **Under `logs/`:** `setup-YYYYMMDD-HHMMSS.log` (one per run)
-- **Docker volumes** (prefixed with project dir name): `cosmos-data` (chain state + keyring; config now on host), `besu-data`, `teku-data`, `relayer-data`, `attestor-data`, `attestor-cosmos-data`, `postgres-data`
+- **Docker volumes** (prefixed with project dir name): `cosmos-data` (chain state + keyring; config now on host), `besu-data`, `relayer-data`, `attestor-data`, `attestor-cosmos-data`, `postgres-data`
 
 `./setup.sh clean` removes all of the above except the downloaded source tarballs in `ibc/` (those stay cached for fast re-runs).
 
@@ -479,9 +464,9 @@ sed -i '' '/^EVM_CLIENT_ID=/d'  ibc/state.env
 | Phase | Function | Source | Description |
 |-------|----------|--------|-------------|
 | 1A | `init_cosmos` | `lib/chains.sh` | Cosmos init, validator + relayer keys, **genesis patch** (bond_denom → uatom, IFT authority → validator), gentx + collect-gentxs |
-| 1B | `init_ethereum` | `lib/chains.sh` | JWT secret, start Besu, generate Teku beacon-state SSZ with matching EL hash, BLS validator keystores into teku-data volume |
-| 2 | `start_services` | `lib/chains.sh` | `docker compose up -d cosmos teku` (Besu already running) |
-| 3 | `wait_for_services` | `lib/chains.sh` | Poll cosmos status + teku sync endpoint |
+| 1B | `init_ethereum` | `lib/chains.sh` | Start Besu (QBFT consensus runs internally — single validator keyed by `evm/key`, address baked into `el-genesis.json` extraData; no CL/Engine API) |
+| 2 | `start_services` | `lib/chains.sh` | `docker compose up -d cosmos` (Besu already running) |
+| 3 | `wait_for_services` | `lib/chains.sh` | Poll cosmos status + besu `eth_blockNumber` |
 | 4A0 | `fetch_solidity_ibc` | `lib/ibc.sh` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`) |
 | 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
 | 4A1 | `deploy_ift_contracts` | `lib/ibc.sh` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
@@ -502,7 +487,7 @@ sed -i '' '/^EVM_CLIENT_ID=/d'  ibc/state.env
 | 4F3 | `register_ift_bridges` | `lib/ibc.sh` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT-checksummed> evm` (EIP-55 checksum is critical — wfchain x/ift does plain string compare against ICS27GMP's checksummed sender). Uses `cosmos_tx_and_wait` so each tx is poll-confirmed before the next fires. Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
 | 4F3a | `register_evm_ift_bridge` | `lib/ibc.sh` | (1) `wfchaind query gmp get-address <client> <TestIFT-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased — different casing produces a different ICA, silently breaking the mint). (2) `wfchaind query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)` via `cast --create` from compiled bytecode. (4) `TestIFT.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
 | 4F4 | `finalize_relayer_config` | `lib/ibc.sh` | Re-render `config.yml` now that both client IDs are known; restart relayer |
-| 4G | `demo_all` | `lib/demo.sh` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands (`print_balance_curl_cmds`) before broadcasting so you can re-query balances live. Direction-aware polling: cosmos→evm caps at 120s (AttestationLightClient on EVM — no finality wait); evm→cosmos caps at 300s (Cosmos-side attestations LC waits Ethereum beacon finality). `demo_failure_and_retry` waits exactly until the packet's TTL has expired (precise wait based on `short_ts`, not a fixed 75s sleep). `demo_observability` probes relayer/attestor endpoints from inside `ibc-net` via `curl_in_net` since none of those ports are published on the host. |
+| 4G | `demo_all` | `lib/demo.sh` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands (`print_balance_curl_cmds`) before broadcasting so you can re-query balances live. Direction-aware polling: cosmos→evm caps at 120s, evm→cosmos caps at 300s. `demo_failure_and_retry` waits exactly until the packet's TTL has expired (precise wait based on `short_ts`, not a fixed 75s sleep). `demo_observability` probes relayer/attestor endpoints from inside `ibc-net` via `curl_in_net` since none of those ports are published on the host. |
 
 All on-chain Cosmos txs run through `cosmos_tx_and_wait` (in `lib/common.sh`)
 which polls `/cosmos/tx/v1beta1/txs/<hash>` until commit, surfaces the chain's

@@ -19,7 +19,7 @@ trusts those signatures.
 ```
 ┌─────────────────────────────┐                ┌─────────────────────────────┐
 │  Chain A: Cosmos (wfchain)  │   ◄────────►   │  Chain B: Ethereum (Besu)   │
-│  CometBFT consensus         │  IBC v2 over   │  Besu (EL) + Teku (CL)      │
+│  CometBFT consensus         │  IBC v2 over   │  QBFT consensus (1 sealer)  │
 │  uatom + uift tokens        │   attestation  │  TestIFT ERC20 (UIFT/uift)  │
 └─────────────────────────────┘                └─────────────────────────────┘
 ```
@@ -62,21 +62,20 @@ run directly against the host file — no `docker cp` roundtrip. Other
 runtime state (keyring, blockchain state) stays in the `cosmos-data`
 named volume.
 
-### Chain B — Ethereum (Besu + Teku)
+### Chain B — Ethereum (Besu)
 
-A single-validator Ethereum devnet, but Ethereum needs **two** processes
-because it's a two-layer stack:
+A single-node Ethereum devnet running Besu in **QBFT** mode — Besu's
+built-in IBFT 2.0 / QBFT consensus, so there's no separate consensus
+layer process. One container produces blocks and serves the EVM.
 
 | Service | What it does |
 |---------|--------------|
-| `besu` | Execution layer (EL). Runs the EVM, holds account state, exposes JSON-RPC. |
-| `teku`  | Consensus layer (CL). Runs the beacon chain + an embedded validator client; produces blocks and finality. |
+| `besu` | Single-node Ethereum: runs the EVM, holds account state, exposes JSON-RPC, and seals QBFT blocks itself using the validator key in `evm/key`. |
 
 | Endpoint | Port | What for |
 |----------|------|----------|
 | Besu JSON-RPC | `localhost:8545` | `cast`, web3 clients, the relayer |
 | Besu WebSocket | `localhost:8546` | Subscriptions (used by attestor) |
-| Teku Beacon REST | `localhost:5051` | Finality status, beacon state |
 
 Tokens on this chain:
 - ETH for gas (pre-funded validator account)
@@ -207,7 +206,6 @@ clients.
 
 3. proof-api fetches:
    - the packet commitment from besu:8545
-   - beacon finality from teku:5051
    - signed attestations from attestor (the EVM watcher)
    └─ Builds a Cosmos MsgRecvPacket
 
@@ -223,13 +221,8 @@ clients.
 5. wf1...recipient now holds 1000000 uift on Cosmos.
 ```
 
-**Why EVM→Cosmos is slower (~2-3 min) than Cosmos→EVM (<30 s):** the
-Cosmos-side attestations LC will only accept proofs at heights that
-Ethereum's beacon chain has *finalized* (~2 epochs even on this devnet
-with minimal preset). The Cosmos→EVM direction has no such wait —
-`AttestationLightClient` accepts state attestations at any height the
-attestors have signed. The demo's status tracker reflects this
-asymmetry: Cosmos→EVM polls for ≤120 s, EVM→Cosmos for ≤300 s.
+The demo's status tracker polls for ≤120 s on Cosmos→EVM and ≤300 s
+on EVM→Cosmos.
 
 The two key addresses to keep separate in the EVM→Cosmos direction
 (easy to confuse, breaks minting silently if you swap them):
@@ -330,7 +323,7 @@ After a setup run, you'll find:
 | `ibc/local/{config.yml,keys.json,relayer.json,attestor*.toml,.ibc-attestor/}` | Phase 4D/4D1/keystore generator | relayer + attestor + proof-api configs |
 | `ibc/state.env` | every phase via `state_set` | accumulated addresses + IDs (no duplicates — `state_set` does in-place key replace) |
 | `ibc/solidity-ibc-eureka-<tag>/` | Phase 4A0 | downloaded contract source (~50 MB) |
-| `evm/jwt.hex`, `evm/cl-genesis.ssz` | Phase 1B | Engine API JWT + Teku beacon genesis |
+| `evm/key` | Phase 1B | Besu node private key — derives the QBFT validator address |
 
 `./setup.sh clean` removes all of these and wipes the docker volumes.
 

@@ -212,7 +212,7 @@ _ensure_attestor_keystore() {
 }
 
 # ─── Phase 4B5b ──────────────────────────────────────────────────────────────
-# Render ClientState + ConsensusState (attestor address, beacon slot/ts),
+# Render ClientState + ConsensusState (attestor address, EVM height + ts),
 # submit MsgCreateClient, poll REST until the attestations-N client appears.
 create_ibc_clients() {
   if [[ -n "${COSMOS_CLIENT_ID:-}" ]]; then
@@ -234,31 +234,26 @@ create_ibc_clients() {
     die "Failed to get valid attestor address (got: $attestor_eth_addr)"
   log "  Attestor address: $attestor_eth_addr"
 
-  # Beacon slot: finalized first, head fallback, floor of 1 (latest_height > 0).
-  local beacon_slot
-  beacon_slot=$(curl -sf "http://localhost:5051/eth/v1/beacon/headers/finalized" 2>/dev/null \
-    | jq -r '.data.header.message.slot // "0"' 2>/dev/null || echo "0")
-  [[ "$beacon_slot" =~ ^[0-9]+$ ]] || beacon_slot=0
-  if [[ "$beacon_slot" -eq 0 ]]; then
-    beacon_slot=$(curl -sf "http://localhost:5051/eth/v1/beacon/headers/head" 2>/dev/null \
-      | jq -r '.data.header.message.slot // "0"' 2>/dev/null || echo "0")
-    [[ "$beacon_slot" =~ ^[0-9]+$ ]] || beacon_slot=0
-  fi
-  [[ "$beacon_slot" -gt 0 ]] || beacon_slot=1
+  # EVM head height + its block timestamp. With Besu running internal QBFT
+  # (no separate CL), the attestation LC trusts the EVM block directly. Floor
+  # the height to 1 because the LC requires latest_height > 0 even if no
+  # blocks have been produced yet.
+  local evm_height_hex evm_height block_json block_ts_hex evm_ts evm_ts_ns
+  evm_height_hex=$(curl -sf http://localhost:8545 \
+    -X POST -H 'Content-Type: application/json' \
+    -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' 2>/dev/null \
+    | jq -r '.result // "0x0"' 2>/dev/null) || evm_height_hex="0x0"
+  evm_height=$(( evm_height_hex ))
+  (( evm_height > 0 )) || evm_height=1
 
-  local genesis_time
-  genesis_time=$(curl -sf "http://localhost:5051/eth/v1/beacon/genesis" 2>/dev/null \
-    | jq -r '.data.genesis_time // "0"' 2>/dev/null || echo "0")
-  [[ "$genesis_time" =~ ^[0-9]+$ && "$genesis_time" -gt 0 ]] || genesis_time=$(date +%s)
-
-  local seconds_per_slot
-  seconds_per_slot=$(curl -sf "http://localhost:5051/eth/v1/config/spec" 2>/dev/null \
-    | jq -r '.data.SECONDS_PER_SLOT // "12"' 2>/dev/null || echo "12")
-  [[ "$seconds_per_slot" =~ ^[0-9]+$ && "$seconds_per_slot" -gt 0 ]] || seconds_per_slot=12
-
-  local beacon_ts=$(( genesis_time + beacon_slot * seconds_per_slot ))
-  local beacon_ts_ns=$(( beacon_ts * 1000000000 ))
-  log "  Beacon slot=$beacon_slot genesis_time=$genesis_time seconds_per_slot=$seconds_per_slot ts=$beacon_ts"
+  block_json=$(curl -sf http://localhost:8545 \
+    -X POST -H 'Content-Type: application/json' \
+    -d "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBlockByNumber\",\"params\":[\"${evm_height_hex}\",false],\"id\":1}" 2>/dev/null) || block_json=""
+  block_ts_hex=$(echo "$block_json" | jq -r '.result.timestamp // "0x0"' 2>/dev/null || echo "0x0")
+  evm_ts=$(( block_ts_hex ))
+  (( evm_ts > 0 )) || evm_ts=$(date +%s)
+  evm_ts_ns=$(( evm_ts * 1000000000 ))
+  log "  EVM height=$evm_height ts=$evm_ts"
 
   # Render ClientState and ConsensusState directly into ./cosmos/local/ on
   # the host. The cosmos service has ./cosmos bind-mounted RO at
@@ -266,10 +261,10 @@ create_ibc_clients() {
   # there — RO is fine, the tx only reads them.
   local local_dir="$COSMOS_CFG_DIR/local"
   mkdir -p "$local_dir"
-  ATTESTOR_ETH_ADDR="$attestor_eth_addr" BEACON_SLOT="$beacon_slot" \
+  ATTESTOR_ETH_ADDR="$attestor_eth_addr" EVM_HEIGHT="$evm_height" \
     render_template "$IBC_DIR/client-state.json.tmpl" \
                     "$local_dir/ibc_client_state.json"
-  BEACON_TS_NS="$beacon_ts_ns" \
+  EVM_TS_NS="$evm_ts_ns" \
     render_template "$IBC_DIR/consensus-state.json.tmpl" \
                     "$local_dir/ibc_consensus_state.json"
   log "  ClientState: $(cat "$local_dir/ibc_client_state.json")"
@@ -886,7 +881,7 @@ finalize_relayer_config() {
 # order. State.env survives across runs so re-runs are fast.
 setup_ibc() {
   log "╔══════════════════════════════════════════════════╗"
-  log "║  IBC Setup: Cosmos ↔ Besu + Teku (Ethereum)       ║"
+  log "║  IBC Setup: Cosmos ↔ Besu (Ethereum)             ║"
   log "╚══════════════════════════════════════════════════╝"
 
   # DO NOT wipe state.env here: each phase is idempotent (checks state or

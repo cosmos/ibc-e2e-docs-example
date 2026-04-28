@@ -1,9 +1,8 @@
-# IBC Demo: Cosmos (wfchain) ↔ Ethereum (Besu EL + Teku CL)
+# IBC Demo: Cosmos (wfchain) ↔ Ethereum (Besu EL)
 #
 # Chain A — Cosmos:   single CometBFT validator, standard Cosmos SDK IBC
 # Chain B — Ethereum: single PoS validator (Gasper, post-merge from block 0)
 #   • Besu  = execution layer (EVM, JSON-RPC, Engine API)
-#   • Teku  = consensus layer (beacon node + embedded validator client)
 
 services:
 
@@ -36,10 +35,11 @@ services:
   besu:
     image: ${BESU_IMAGE:-hyperledger/besu:26.2.0}
     container_name: besu
-    command: [ "--config-file=/evm/besu.toml" ]
+    command: [ "--config-file=/evm/besu.toml", "--metrics-enabled", "--metrics-host=0.0.0.0", "--metrics-port=9545", "--Xqbft-enable-early-round-change"]
     ports:
       - "8545:8545" # EVM JSON-RPC
       - "8546:8546" # EVM WebSocket
+      - "9545:9545"
     volumes:
       - besu-data:/data
       - ./evm:/evm:ro
@@ -56,30 +56,6 @@ services:
       timeout: 3s
       retries: 60
       start_period: 10s
-
-  # ── Chain B / CL: Teku (consensus layer + embedded validator client) ──────
-  teku:
-    image: ${TEKU_IMAGE:-consensys/teku:26.4}
-    user: root
-    container_name: teku
-    command: [ "--config-file=/evm/teku.yaml" ]
-    ports:
-      - "5051:5051" # Beacon REST API
-    volumes:
-      - teku-data:/data
-      - ./evm:/evm:ro
-    networks:
-      - ibc-net
-    depends_on:
-      besu:
-        condition: service_healthy
-    restart: on-failure
-    healthcheck:
-      test: [ "CMD-SHELL", "curl -sf http://localhost:5051/eth/v1/node/syncing | grep -q 'is_syncing'" ]
-      interval: 5s
-      timeout: 3s
-      retries: 60
-      start_period: 20s
 
   # ── Relayer database ─────────────────────────────────────────────────────
   postgres:
@@ -119,8 +95,6 @@ services:
         condition: service_healthy
       besu:
         condition: service_healthy
-      teku:
-        condition: service_healthy
       proof-api:
         condition: service_started
     restart: on-failure
@@ -142,8 +116,6 @@ services:
       cosmos:
         condition: service_healthy
       besu:
-        condition: service_healthy
-      teku:
         condition: service_healthy
     restart: on-failure
 
@@ -182,8 +154,6 @@ services:
         condition: service_healthy
       besu:
         condition: service_healthy
-      teku:
-        condition: service_healthy
       attestor:
         condition: service_started
       attestor-cosmos:
@@ -193,7 +163,6 @@ services:
 volumes:
   cosmos-data:
   besu-data:
-  teku-data:
   relayer-data:
   attestor-data:
   attestor-cosmos-data:

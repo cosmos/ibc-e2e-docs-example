@@ -93,122 +93,23 @@ init_cosmos() {
 }
 
 init_ethereum() {
-  log "Initialising Ethereum (Besu + Teku)..."
+  log "Initialising Ethereum (Besu)..."
   [[ -f "$EVM_DIR/el-genesis.json" ]] || die "evm/el-genesis.json not found"
-  [[ -f "$EVM_DIR/cl-config.yaml" ]]  || die "evm/cl-config.yaml not found"
-
-  # JWT secret — regenerating while Besu is live would break Engine API auth.
-  if docker compose ps besu 2>/dev/null | grep -q "Up"; then
-    if [[ -f "$EVM_DIR/jwt.hex" ]]; then
-      log "jwt.hex already present and Besu is running — reusing"
-    else
-      log "Besu running but jwt.hex missing — restarting Besu with new secret"
-      openssl rand -hex 32 | tr -d '\n' > "$EVM_DIR/jwt.hex"
-      docker compose restart besu
-    fi
-  else
-    openssl rand -hex 32 | tr -d '\n' > "$EVM_DIR/jwt.hex"
-    log "jwt.hex written"
-  fi
 
   log "Starting Besu..."
   docker compose up -d besu
   wait_for_rpc "besu" "http://localhost:8545"
 
-  local genesis_block el_genesis_ts_hex
-  genesis_block=$(curl -sf http://localhost:8545 \
-    -X POST -H 'Content-Type: application/json' \
-    -d '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x0",false],"id":1}')
-  EL_GENESIS_HASH=$(echo "$genesis_block" | jq -r '.result.hash')
-  el_genesis_ts_hex=$(echo "$genesis_block" | jq -r '.result.timestamp')
-  EL_GENESIS_TS_DEC=$(( el_genesis_ts_hex ))
-  log "Besu EL genesis hash : $EL_GENESIS_HASH"
-  log "Besu EL genesis time : $EL_GENESIS_TS_DEC"
-
-  if [[ -f "$EVM_DIR/cl-genesis.ssz" ]]; then
-    log "cl-genesis.ssz already present — skipping regeneration"
-  else
-    local cl_genesis_time; cl_genesis_time=$(date +%s)
-    log "Generating CL genesis SSZ (genesis-time=$cl_genesis_time, el-hash=$EL_GENESIS_HASH)..."
-
-    local tmp_cfg; tmp_cfg=$(mktemp)
-    sed "s/^MIN_GENESIS_TIME:.*/MIN_GENESIS_TIME: $cl_genesis_time/" \
-      "$EVM_DIR/cl-config.yaml" > "$tmp_cfg"
-    render_template "$EVM_DIR/mnemonics.yaml.tmpl" "$EVM_DIR/mnemonics.yaml"
-
-    docker run --rm --user root \
-      --entrypoint /usr/local/bin/eth-genesis-state-generator \
-      -v "$EVM_DIR":/evm \
-      -v "$tmp_cfg":/cl-genesis-config.yaml:ro \
-      "$ETH2_TESTNET_GENESIS_IMAGE" \
-      beaconchain \
-        --config /cl-genesis-config.yaml \
-        --eth1-config /evm/el-genesis.json \
-        --mnemonics /evm/mnemonics.yaml \
-        --state-output /evm/cl-genesis.ssz \
-        --json-output /evm/cl-genesis-debug.json
-
-    local genesis_el_hash
-    genesis_el_hash=$(jq -r '.latest_execution_payload_header.block_hash' \
-      "$EVM_DIR/cl-genesis-debug.json" 2>/dev/null || echo "unknown")
-    rm -f "$EVM_DIR/cl-genesis-debug.json" "$tmp_cfg" "$EVM_DIR/mnemonics.yaml"
-    [[ "$genesis_el_hash" == "$EL_GENESIS_HASH" ]] || \
-      die "EL genesis hash mismatch: expected $EL_GENESIS_HASH got $genesis_el_hash"
-    log "cl-genesis.ssz written (EL genesis hash verified)"
-  fi
-
-  # BLS validator keystores → teku-data volume (idempotent).
-  local teku_keys_cid has_keys=""
-  teku_keys_cid=$(docker create -v "${COMPOSE_PROJECT}_teku-data":/data "$TEKU_IMAGE" 2>/dev/null)
-  docker cp "${teku_keys_cid}:/data/validators/keys" - >/dev/null 2>&1 && has_keys="yes"
-  docker rm "$teku_keys_cid" >/dev/null 2>&1
-
-  if [[ -n "$has_keys" ]]; then
-    log "Validator keystores already present — skipping"
-  else
-    log "Generating BLS validator keystores (eth2-val-tools → teku volume)..."
-    docker run --rm --user root \
-      -v "${COMPOSE_PROJECT}_teku-data":/data \
-      "$ETH2_VAL_TOOLS_IMAGE" \
-      keystores --insecure \
-        --source-mnemonic "$DEVNET_MNEMONIC" \
-        --source-min 0 --source-max 1 \
-        --out-loc /data/validators
-
-    # Teku wants each secret file wrapped in a directory named after its pubkey.
-    docker run --rm --user root --entrypoint /bin/sh \
-      -v "${COMPOSE_PROJECT}_teku-data":/data "$TEKU_IMAGE" \
-      -c 'for f in /data/validators/secrets/0x*; do
-            [ -f "$f" ] || continue
-            tmp="${f}.tmp"
-            mkdir "$tmp" && mv "$f" "$tmp/voting-keystore.txt" && mv "$tmp" "$f"
-          done'
-    log "BLS keystores at /data/validators/keys/"
-  fi
-
   log "Ethereum init done"
 }
 
 start_services() {
-  log "Starting cosmos + teku..."
-  docker compose up -d cosmos teku
+  log "Starting cosmos..."
+  docker compose up -d cosmos
 }
 
 wait_for_services() {
   wait_for_cosmos "cosmos" "http://localhost:26657"
-  local max=120 step=3 elapsed=0
-  log "Waiting for teku beacon node..."
-  while true; do
-    local syncing
-    syncing=$(curl -sf http://localhost:5051/eth/v1/node/syncing 2>/dev/null \
-      | jq -r '.data.is_syncing') || syncing="err"
-    if [[ "$syncing" == "false" ]]; then
-      log "Teku is synced"; break
-    fi
-    (( elapsed += step ))
-    (( elapsed >= max )) && die "Teku did not sync within ${max}s"
-    sleep "$step"; echo -n "."
-  done
 }
 
 print_status() {
@@ -227,9 +128,6 @@ print_status() {
   info "   Chain ID      : $ETH_CHAIN_ID"
   info "   Funded addr   : $ETH_VALIDATOR_ADDR"
   info "   Private key   : $ETH_VALIDATOR_PRIVKEY"
-  info ""
-  info " Teku (Ethereum CL)"
-  info "   Beacon REST   : http://localhost:5051"
   info "════════════════════════════════════════════"
   echo ""
 
@@ -264,16 +162,11 @@ clean() {
   docker compose down -v --remove-orphans 2>/dev/null || true
 
   _clean_path \
-    "$EVM_DIR/jwt.hex" \
-    "$EVM_DIR/cl-genesis.ssz" \
-    "$EVM_DIR/cl-genesis-debug.json" \
-    "$EVM_DIR/mnemonics.yaml" \
-    "$EVM_DIR/keystores" \
     "$COSMOS_CFG_DIR/local" \
     "$IBC_DIR/local" \
     "$IBC_DIR/state.env" \
-    #"$IBC_DIR"/solidity-ibc-eureka-* \
-    #"$IBC_DIR"/ibc-relayer-*
+    "$IBC_DIR"/solidity-ibc-eureka-* \
+    "$IBC_DIR"/ibc-relayer-*
 
   log "Clean done"
 }

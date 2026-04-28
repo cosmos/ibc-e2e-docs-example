@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh — boot a Cosmos (wfchain) + Besu+Teku (Ethereum) devnet and wire up
+# setup.sh — boot a Cosmos (wfchain) + Besu (Ethereum) devnet and wire up
 #            IBC between them using cosmos/solidity-ibc-eureka.
 #
 # Usage:
@@ -23,7 +23,7 @@
 #   ICS26_ROUTER_ADDR       — skip forge deploy
 #   EVM_ATTESTATION_LC_ADDR — skip AttestationLightClient deploy
 #
-# Requirements: docker (compose plugin), jq, curl, openssl
+# Requirements: docker (compose plugin), jq, curl
 
 set -euo pipefail
 
@@ -32,7 +32,7 @@ cd "$SCRIPT_DIR"
 LIB_DIR="$SCRIPT_DIR/lib"
 # Static configs + templates, grouped by which service reads them.
 COSMOS_CFG_DIR="$SCRIPT_DIR/cosmos"   # app.toml, config.toml, genesis jq filters
-EVM_DIR="$SCRIPT_DIR/evm"              # besu.toml, teku.yaml, el-genesis, mnemonics tmpl
+EVM_DIR="$SCRIPT_DIR/evm"              # besu.toml, el-genesis.json, key
 IBC_DIR="$SCRIPT_DIR/ibc"              # relayer + attestor + proof-api templates, runtime state
 
 # ─── Log file ─────────────────────────────────────────────────────────────────
@@ -48,18 +48,7 @@ COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$SCRIPT_DIR")}"
 
 # Docker images — exported so docker-compose.yml picks them up via ${VAR:-default}.
 export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}"
-export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:26.2.0}"
-export TEKU_IMAGE="${TEKU_IMAGE:-consensys/teku:26.4}"
-export ETH2_VAL_TOOLS_IMAGE="${ETH2_VAL_TOOLS_IMAGE:-protolambda/eth2-val-tools}"
-# ethpandaops publishes separate arch-specific tags for this image (no
-# multi-arch manifest), so pick based on host. Apple-silicon dev hosts get
-# arm64; everything else (x86 Linux, CI runners) gets amd64.
-case "$(uname -m)" in
-  arm64|aarch64) _eth2_genesis_arch="arm64" ;;
-  *)             _eth2_genesis_arch="amd64" ;;
-esac
-export ETH2_TESTNET_GENESIS_IMAGE="${ETH2_TESTNET_GENESIS_IMAGE:-ethpandaops/ethereum-genesis-generator:master-linux-${_eth2_genesis_arch}}"
-unset _eth2_genesis_arch
+export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:25.4.0}"
 export FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:latest}"
 export BUN_IMAGE="${BUN_IMAGE:-oven/bun:1}"
 export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}"
@@ -78,11 +67,8 @@ COSMOS_RELAYER_BALANCE="10000000uatom"        #     10 ATOM (relayer gas)
 
 # Ethereum
 ETH_CHAIN_ID=32382
-ETH_VALIDATOR_ADDR="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+ETH_VALIDATOR_ADDR="0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 ETH_VALIDATOR_PRIVKEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-
-# DEVNET mnemonic — insecure, for local devnet only, never use on mainnet.
-DEVNET_MNEMONIC="${DEVNET_MNEMONIC:-plastic ozone child tennis endless permit sort glory evolve text because disease acoustic perfect master want artefact comic escape machine exclude bread melt play}"
 
 # IBC (Phase 4)
 SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-}"
@@ -137,7 +123,7 @@ source "$LIB_DIR/demo.sh"
 cmd_chains() {
   check_prerequisites
   log "╔══════════════════════════════════════════════════╗"
-  log "║  IBC Demo: Cosmos ↔ Besu+Teku (Ethereum)          ║"
+  log "║  IBC Demo: Cosmos ↔ Besu (Ethereum, QBFT)         ║"
   log "╚══════════════════════════════════════════════════╝"
   log "--- Phase 1: Chain initialisation ---"
   init_cosmos
@@ -182,9 +168,9 @@ cmd_demo() {
     transfer)   demo_cosmos_to_evm_transfer; demo_evm_to_cosmos_transfer ;;
     cosmos-evm) demo_cosmos_to_evm_transfer ;;
     evm-cosmos) demo_evm_to_cosmos_transfer ;;
-    #track)      demo_track_packet_status ;;
-    #failure)    demo_failure_and_retry ;;
-    #observe)    demo_observability ;;
+    track)      demo_track_packet_status ;;
+    failure)    demo_failure_and_retry ;;
+    observe)    demo_observability ;;
     all)        demo_all ;;
     *)
       echo "Usage: $0 demo [transfer|cosmos-evm|evm-cosmos|track|failure|observe|all]"

@@ -14,7 +14,6 @@ check_prerequisites() {
   docker compose version >/dev/null 2>&1 || die "'docker compose' plugin required"
   command -v jq        >/dev/null || die "jq is required"
   command -v curl      >/dev/null || die "curl is required"
-  command -v openssl   >/dev/null || die "openssl is required"
 }
 
 # Render a template via bash variable expansion. Templates are trusted (in-repo);
