@@ -52,7 +52,7 @@ snapshot_transfer_balances() {
   fi
 }
 
-# Send an IBC transfer via wfchain's IFT module. wfchain has no standard
+# Send an IBC transfer via sandbox's IFT module. sandbox has no standard
 # ibc-transfer module — `tx ift transfer` is the only path.
 # Args: <source_client> <recipient> <amount-with-denom> <timeout_ts>
 # Signature: tx ift transfer [denom] [client_id] [receiver] [amount] [timeout_timestamp]
@@ -70,7 +70,7 @@ cosmos_ibc_transfer() {
   # Creating/Created" status lines; callers jq-parse the output and they'd
   # otherwise choke.
   local out
-  out=$(run_in cosmos "$COSMOS_BINARY" tx ift transfer \
+  out=$(run_in cosmos tx ift transfer \
     "$amt_denom" "$source_client" "$recipient" "$amt_num" "$timeout_ts" \
     --from validator --keyring-backend test --home "$COSMOS_HOME" \
     --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
@@ -163,7 +163,7 @@ demo_cosmos_to_evm_transfer() {
   local amount="${BASH_REMATCH[1]}" denom="${BASH_REMATCH[2]}"
 
   local sender
-  sender=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
+  sender=$(run_in cosmos keys show validator -a \
     --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
 
   log "  from   : $sender (Cosmos)"
@@ -271,7 +271,7 @@ demo_evm_to_cosmos_transfer() {
     log "╚═════════════════════════════════════════════════════════════════════════╝"; return 0; }
 
   local receiver amount=1000000
-  receiver=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
+  receiver=$(run_in cosmos keys show validator -a \
     --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
 
   local timeout_ts=$(( $(date +%s) + 1200 ))

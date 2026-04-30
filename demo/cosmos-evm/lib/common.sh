@@ -33,10 +33,25 @@ RENDER_EOF
 " > "$out"
 }
 
-# One-off container using the compose service's image + mounts, no entrypoint.
+# One-off container using the compose service's image + mounts. Uses the
+# image's default ENTRYPOINT unless RUN_IN_ENTRYPOINT is exported, in which
+# case it overrides the entrypoint for that call.
+#
+# Why both modes:
+#   • Default-entrypoint mode is right when the image's entrypoint is just
+#     the chain binary (e.g. `ENTRYPOINT ["sandboxd"]`). Callers pass only
+#     the subcommand: `run_in cosmos keys show validator …`.
+#   • Override mode is required when the image bakes a subcommand into its
+#     entrypoint (e.g. `ENTRYPOINT ["sandboxd","start"]`) — appending
+#     `init sandbox-node …` would still run `start`. Setting
+#     `RUN_IN_ENTRYPOINT=sandboxd` undoes the baked-in subcommand.
+#   • If you genuinely need to bypass the entrypoint (spawn a shell), call
+#     `docker compose run --rm --entrypoint sh "$svc" -c …` directly.
 run_in() {
   local svc="$1"; shift
-  printf 'y\n' | docker compose run --rm --no-deps -T --entrypoint="" "$svc" "$@"
+  local entry_args=()
+  [[ -n "${RUN_IN_ENTRYPOINT:-}" ]] && entry_args=( --entrypoint "$RUN_IN_ENTRYPOINT" )
+  printf 'y\n' | docker compose run --rm --no-deps -T "${entry_args[@]}" "$svc" "$@"
 }
 
 # Submit a Cosmos tx and wait for it to commit. Dies loudly on any failure.
@@ -54,7 +69,7 @@ run_in() {
 cosmos_tx_and_wait() {
   local max=60 step=3 elapsed=0 out hash res code
 
-  out=$(run_in cosmos "$COSMOS_BINARY" "$@" \
+  out=$(run_in cosmos "$@" \
         --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
         --keyring-backend test --home "$COSMOS_HOME" \
         --gas auto --gas-adjustment 1.4 --gas-prices 0.025uatom \

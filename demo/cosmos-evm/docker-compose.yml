@@ -1,4 +1,4 @@
-# IBC Demo: Cosmos (wfchain) ↔ Ethereum (Besu EL)
+# IBC Demo: Cosmos (sandbox) ↔ Ethereum (Besu EL)
 #
 # Chain A — Cosmos:   single CometBFT validator, standard Cosmos SDK IBC
 # Chain B — Ethereum: single PoS validator (Gasper, post-merge from block 0)
@@ -6,9 +6,9 @@
 
 services:
 
-  # ── Chain A: Cosmos (wfchain, 1 CometBFT validator) ──────────────────────
+  # ── Chain A: Cosmos (sandbox, 1 CometBFT validator) ──────────────────────
   cosmos:
-    image: ${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}
+    image: ${COSMOS_IMAGE:-ghcr.io/cosmos/sandbox-ledger:latest}
     user: root
     container_name: cosmos
     command: [ "start", "--home=/data" ]
@@ -25,7 +25,7 @@ services:
       - ibc-net
     restart: on-failure
     healthcheck:
-      test: [ "CMD", "wfchaind", "status", "--home=/data" ]
+      test: [ "CMD", "sandboxd", "status", "--home=/data" ]
       interval: 5s
       timeout: 3s
       retries: 60
@@ -35,7 +35,7 @@ services:
   besu:
     image: ${BESU_IMAGE:-hyperledger/besu:26.2.0}
     container_name: besu
-    command: [ "--config-file=/evm/besu.toml", "--metrics-enabled", "--metrics-host=0.0.0.0", "--metrics-port=9545", "--Xqbft-enable-early-round-change"]
+    command: [ "--config-file=/evm/besu.toml", "--metrics-enabled", "--metrics-host=0.0.0.0", "--metrics-port=9545", "--Xqbft-enable-early-round-change" ]
     ports:
       - "8545:8545" # EVM JSON-RPC
       - "8546:8546" # EVM WebSocket
@@ -167,7 +167,6 @@ volumes:
   attestor-data:
   attestor-cosmos-data:
   postgres-data:
-
 
 networks:
   ibc-net:

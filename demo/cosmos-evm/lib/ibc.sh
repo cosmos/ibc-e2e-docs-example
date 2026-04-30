@@ -143,8 +143,8 @@ deploy_ift_contracts() {
 # into the relayer-data named volume so the relayer can sign Cosmos txs.
 setup_relayer_key() {
   log "Resolving relayer wallet on Cosmos..."
-  RELAYER_ADDR=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
-    "$COSMOS_BINARY" keys show relayer -a --keyring-backend test --home "$COSMOS_HOME")
+  RELAYER_ADDR=$(run_in cosmos keys show relayer -a \
+    --keyring-backend test --home "$COSMOS_HOME")
   log "Relayer wallet: $RELAYER_ADDR"
   state_set RELAYER_ADDR "$RELAYER_ADDR"
 
@@ -257,7 +257,7 @@ create_ibc_clients() {
 
   # Render ClientState and ConsensusState directly into ./cosmos/local/ on
   # the host. The cosmos service has ./cosmos bind-mounted RO at
-  # /cosmos-config, so wfchaind tx ibc client create can read these files
+  # /cosmos-config, so sandboxd tx ibc client create can read these files
   # there — RO is fine, the tx only reads them.
   local local_dir="$COSMOS_CFG_DIR/local"
   mkdir -p "$local_dir"
@@ -272,13 +272,13 @@ create_ibc_clients() {
 
   # Submit MsgCreateClient.
   local tx_output
-  tx_output=$(run_in cosmos "$COSMOS_BINARY" tx ibc client create \
+  tx_output=$(run_in cosmos tx ibc client create \
     /cosmos-config/local/ibc_client_state.json \
     /cosmos-config/local/ibc_consensus_state.json \
     --from relayer --keyring-backend test --home "$COSMOS_HOME" \
     --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
     --gas auto --gas-adjustment 1.4 --gas-prices "0.025uatom" \
-    --yes --output json 2>&1) || tx_output=""
+    --yes --output json)
 
   local tx_hash tx_json_line
   tx_json_line=$(echo "$tx_output" | grep -E '^\{' | tail -1 || echo "")
@@ -348,10 +348,37 @@ generate_relayer_config() {
   mkdir -p "$IBC_DIR/local"
 
   # signing.keys_path JSON: {chain_id: {private_key: hex}}
-  local cosmos_privkey
-  cosmos_privkey=$(run_in cosmos "$COSMOS_BINARY" keys export relayer \
+  #
+  # `keys export --unarmored-hex --unsafe` confirms via stdin (run_in pipes
+  # `printf 'y\n'`) and prints the warning to stderr, BUT older versions
+  # also echoed the prompt to stdout, contaminating the captured output
+  # with prefix bytes. Filter strictly to a single 64-char lowercase hex
+  # line and bail loudly if extraction returns the wrong length — that's
+  # the cause of "relayer signer cosmosX… not found" errors at recv time
+  # (the relayer derives a different address from the contaminated key).
+  local cosmos_privkey raw_export
+  raw_export=$(run_in cosmos keys export relayer \
     --keyring-backend test --home "$COSMOS_HOME" \
-    --unarmored-hex --unsafe 2>/dev/null) || cosmos_privkey=""
+    --unarmored-hex --unsafe 2>/dev/null)
+  cosmos_privkey=$(echo "$raw_export" | grep -Eo '^[0-9a-f]{64}$' | tail -1)
+  if [[ ${#cosmos_privkey} -ne 64 ]]; then
+    warn "cosmos relayer privkey extraction returned ${#cosmos_privkey} chars (expected 64)"
+    warn "raw 'keys export' output (first 200 chars, hex-escaped non-printables):"
+    warn "$(echo "$raw_export" | head -c 200 | od -c | head -5)"
+    die "Aborting — keys.json would have an invalid privkey, recvPacket would fail."
+  fi
+  log "  cosmos relayer privkey: ${#cosmos_privkey} chars (ok)"
+
+  # Cross-check: derive the address from the keyring's relayer key and
+  # compare to RELAYER_ADDR (set earlier by setup_relayer_key). If the
+  # values diverge here the bug is upstream of this helper.
+  local keyring_addr
+  keyring_addr=$(run_in cosmos keys show relayer -a \
+    --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
+  if [[ -n "${RELAYER_ADDR:-}" && -n "$keyring_addr" && "$keyring_addr" != "$RELAYER_ADDR" ]]; then
+    warn "RELAYER_ADDR mismatch: state.env=$RELAYER_ADDR  keyring=$keyring_addr"
+  fi
+  log "  cosmos relayer address (keyring): $keyring_addr"
 
   ETH_PRIVKEY_BARE="${ETH_VALIDATOR_PRIVKEY#0x}" COSMOS_PRIVKEY="$cosmos_privkey" \
     render_template "$IBC_DIR/relayer-keys.json.tmpl" "$IBC_DIR/local/keys.json"
@@ -626,7 +653,7 @@ register_counterparty() {
   fi
 
   log "  add-counterparty: $COSMOS_CLIENT_ID ↔ $EVM_CLIENT_ID"
-  run_in cosmos "$COSMOS_BINARY" tx ibc client add-counterparty \
+  run_in cosmos tx ibc client add-counterparty \
     "$COSMOS_CLIENT_ID" "$EVM_CLIENT_ID" "" \
     --from relayer --keyring-backend test --home "$COSMOS_HOME" \
     --chain-id "$COSMOS_CHAIN_ID" --node "tcp://cosmos:26657" \
@@ -639,7 +666,7 @@ register_counterparty() {
 
 # ─── Phase 4F3 ───────────────────────────────────────────────────────────────
 # Cosmos side of the IFT bridge: compute the EIP-55 checksummed EVM IFT
-# address (critical — wfchain x/ift does string compare against ICS27GMP's
+# address (critical — sandbox x/ift does string compare against ICS27GMP's
 # checksummed sender), self-heal stale registrations, create the tokenfactory
 # subdenom `uift`, then `tx ift register-bridge … evm`. Rewrites
 # DEMO_TRANSFER_AMOUNT to `<N>uift`.
@@ -655,7 +682,7 @@ register_ift_bridges() {
   log "  Cosmos IFT denom: $COSMOS_IFT_DENOM"
 
   local existing_bridge
-  existing_bridge=$(docker compose exec -T cosmos wfchaind query ift bridge \
+  existing_bridge=$(docker compose exec -T cosmos sandboxd query ift bridge \
     "$COSMOS_IFT_DENOM" "$COSMOS_CLIENT_ID" \
     --node tcp://localhost:26657 -o json 2>/dev/null \
     | jq -r '.bridge.counterparty_ift_address // empty' 2>/dev/null || echo "")
@@ -681,9 +708,9 @@ register_ift_bridges() {
   else
     local subdenom="${COSMOS_IFT_DENOM##*/}"
     local validator_addr
-    validator_addr=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
+    validator_addr=$(run_in cosmos keys show validator -a \
       --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
-    if docker compose exec -T cosmos wfchaind query tokenfactory denoms-by-creator \
+    if docker compose exec -T cosmos sandboxd query tokenfactory denoms-by-creator \
          "$validator_addr" --node tcp://localhost:26657 -o json 2>/dev/null \
          | jq -e --arg s "$subdenom" '.denoms[]? | select(. == $s)' >/dev/null 2>&1; then
       log "  Denom '$subdenom' already created by validator — skipping create-denom"
@@ -729,7 +756,7 @@ mint_ift_tokens() {
   # Mint via tokenfactory (IFT module has no mint; it wraps tokenfactory).
   # Signature: tx tokenfactory mint [address] [amount]
   local validator_addr mint_amount="${IFT_MINT_AMOUNT:-1000000000}"
-  validator_addr=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
+  validator_addr=$(run_in cosmos keys show validator -a \
     --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
 
   log "  Minting ${mint_amount}${COSMOS_IFT_DENOM} to ${validator_addr}..."
@@ -741,7 +768,7 @@ mint_ift_tokens() {
 
 # ─── Phase 4F3a ──────────────────────────────────────────────────────────────
 # EVM side of the IFT bridge. Three steps, all shell-only:
-#   1. Ask wfchaind for the ICA address the Cosmos GMP module will use to
+#   1. Ask sandboxd for the ICA address the Cosmos GMP module will use to
 #      sign MsgIFTMint when a packet arrives from the EVM TestIFT proxy.
 #   2. Deploy CosmosIFTSendCallConstructor from compiled bytecode, wiring the
 #      ICA + type URL + denom into it (MinimalDeploy skipped this contract
@@ -774,7 +801,7 @@ register_evm_ift_bridge() {
 
   log "  Computing ICA for (client=$COSMOS_CLIENT_ID, sender=$ift_addr_checksum)..."
   local ica
-  ica=$(docker compose exec -T cosmos wfchaind query gmp get-address \
+  ica=$(docker compose exec -T cosmos sandboxd query gmp get-address \
     "$COSMOS_CLIENT_ID" "$ift_addr_checksum" "" -o json 2>/dev/null \
     | jq -r '.account_address // empty' 2>/dev/null) || ica=""
   [[ -n "$ica" ]] || { warn "Failed to compute ICA via 'query gmp get-address'"; return 0; }
@@ -806,7 +833,7 @@ register_evm_ift_bridge() {
   #     making the relayer report COMPLETE while EVM balance stayed 0.
   log "  Querying Cosmos IFT module account..."
   local cosmos_ift_module
-  cosmos_ift_module=$(docker compose exec -T cosmos wfchaind query auth module-account ift \
+  cosmos_ift_module=$(docker compose exec -T cosmos sandboxd query auth module-account ift \
     --node tcp://localhost:26657 -o json 2>/dev/null \
     | jq -r '.account.base_account.address // .account.value.address // empty' 2>/dev/null) || cosmos_ift_module=""
   [[ -n "$cosmos_ift_module" ]] || die "Failed to resolve Cosmos IFT module account via auth query"
@@ -821,10 +848,10 @@ register_evm_ift_bridge() {
   bytecode=$(jq -r '.bytecode.object' "$ctor_abi")
   [[ -n "$bytecode" && "$bytecode" != "null" ]] || die "Empty bytecode in $ctor_abi"
 
-  # MsgIFTMint type URL + tokenfactory denom match wfchain's x/ift + tokenfactory
+  # MsgIFTMint type URL + tokenfactory denom match sandbox's x/ift + tokenfactory
   # wiring; keeping them together here so the constructor matches what
   # CosmosIFTSendCallConstructor expects on the other side.
-  local type_url="/wfchain.ift.MsgIFTMint"
+  local type_url="/sandbox.ift.MsgIFTMint"
 
   log "  Encoding constructor args (typeUrl, denom, ica)..."
   local ctor_args

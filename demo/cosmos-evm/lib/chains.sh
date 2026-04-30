@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Phase 1-3: chain initialisation, boot, readiness.
 
-# Reclaim host-user ownership of cosmos/local/. wfchaind runs as root inside
+# Reclaim host-user ownership of cosmos/local/. sandboxd runs as root inside
 # the container, so files it writes through the /data/config/ bind-mount end
 # up root-owned on the host. macOS Docker Desktop transparently maps UIDs so
 # this is a no-op there; on Linux/CI runners the host user can't read those
@@ -18,7 +18,7 @@ _ensure_host_owns_cosmos_local() {
 
 # Apply a jq program to genesis.json directly on the host. The cosmos
 # /data/config/ directory is bind-mounted from ./cosmos/local/config/ (see
-# docker-compose.yml), so wfchaind init / add-genesis-account /
+# docker-compose.yml), so sandboxd init / add-genesis-account /
 # collect-gentxs and these jq patches all write through to the same file —
 # no volume roundtrip needed.
 # Usage: patch_cosmos_genesis <prog.jq> [extra jq args...]
@@ -35,54 +35,87 @@ init_cosmos() {
   log "Initialising Cosmos chain ($COSMOS_CHAIN_ID)..."
 
   # Pre-create the host config dir so the directory bind-mount in
-  # docker-compose.yml resolves cleanly. wfchaind init writes its default
+  # docker-compose.yml resolves cleanly. sandboxd init writes its default
   # genesis.json / app.toml / config.toml / *_key.json files directly into
   # this directory; we then overwrite app.toml / config.toml with our
   # customized versions and apply jq patches to genesis.json.
   mkdir -p "$COSMOS_CFG_DIR/local/config"
 
-  # Idempotency guard — re-running add-genesis-account / gentx fails.
-  if run_in cosmos "$COSMOS_BINARY" keys show validator \
+  # Always sync our customized app.toml / config.toml — this happens before
+  # the idempotency guard so edits to ./cosmos/{app,config}.toml apply on
+  # re-runs without `./setup.sh clean`. On a *fresh* run the dest files
+  # don't exist yet (init hasn't run); cp creates them, and init's
+  # subsequent --overwrite call replaces them with its own defaults that
+  # we'll need to re-cp at the end of this function to win.
+  if [[ -f "$COSMOS_CFG_DIR/local/config/genesis.json" ]]; then
+    _ensure_host_owns_cosmos_local
+    cp "$COSMOS_CFG_DIR/app.toml"    "$COSMOS_CFG_DIR/local/config/app.toml"
+    cp "$COSMOS_CFG_DIR/config.toml" "$COSMOS_CFG_DIR/local/config/config.toml"
+  fi
+
+  # Idempotency guard — re-running keys add / add-genesis-account fails.
+  if run_in cosmos keys show validator \
       --keyring-backend test --home "$COSMOS_HOME" >/dev/null 2>&1; then
     log "Cosmos already initialised — skipping (validator key present)"
     return 0
   fi
 
-  run_in cosmos "$COSMOS_BINARY" init wfchain-node \
-    --chain-id "$COSMOS_CHAIN_ID" --home "$COSMOS_HOME" --overwrite 2>/dev/null
+  run_in cosmos init sandbox-node \
+    --chain-id "$COSMOS_CHAIN_ID" --home "$COSMOS_HOME" \
+    --default-denom "$COSMOS_DENOM" --overwrite
 
-  run_in cosmos "$COSMOS_BINARY" keys add validator \
-    --keyring-backend test --home "$COSMOS_HOME" --output json --no-backup 2>/dev/null
+  # `--key-type secp256k1` overrides sandbox's default of `eth_secp256k1`.
+  # The Go ibc-relayer parses its keys.json privkey via the standard
+  # cosmos-sdk `secp256k1.PrivKey.UnmarshalAmino`, which derives addresses
+  # as bech32(ripemd160(sha256(pubkey))). `eth_secp256k1` uses Ethereum-
+  # style bech32(keccak256(pubkey)[12:]) — the SAME 32 raw privkey bytes
+  # produce DIFFERENT bech32 addresses across the two algorithms, which
+  # surfaces as `account cosmosX… not found` at recvPacket time even
+  # though the privkey extraction is clean.
+  run_in cosmos keys add validator --key-type secp256k1 \
+    --keyring-backend test --home "$COSMOS_HOME" --output json --no-backup
   local validator_addr
-  validator_addr=$(run_in cosmos "$COSMOS_BINARY" keys show validator -a \
-    --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null)
-  run_in cosmos "$COSMOS_BINARY" genesis add-genesis-account \
+  validator_addr=$(run_in cosmos keys show validator -a \
+    --keyring-backend test --home "$COSMOS_HOME")
+  run_in cosmos genesis add-genesis-account \
     "$validator_addr" "$COSMOS_VALIDATOR_BALANCE" --home "$COSMOS_HOME"
 
-  run_in cosmos "$COSMOS_BINARY" keys add relayer \
-    --keyring-backend test --home "$COSMOS_HOME" --output json --no-backup 2>/dev/null
+  run_in cosmos keys add relayer --key-type secp256k1 \
+    --keyring-backend test --home "$COSMOS_HOME" --output json --no-backup
   local relayer_addr
-  relayer_addr=$(run_in cosmos "$COSMOS_BINARY" keys show relayer -a \
-    --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null)
-  run_in cosmos "$COSMOS_BINARY" genesis add-genesis-account \
+  relayer_addr=$(run_in cosmos keys show relayer -a \
+    --keyring-backend test --home "$COSMOS_HOME")
+  run_in cosmos genesis add-genesis-account \
     "$relayer_addr" "$COSMOS_RELAYER_BALANCE" --home "$COSMOS_HOME"
 
-  # Patch bond_denom etc. BEFORE gentx so the stake denom validates correctly.
-  # Also override IFT module authority to the validator so `tx ift register-bridge`
-  # works with --from validator (default authority is the gov module account).
-  log "Patching Cosmos genesis (bond_denom → uatom, ift authority → validator)..."
+  # The PoA module needs at least one validator pre-baked into genesis or
+  # its `init_genesis` rejects on `total_power == 0`. We use the consensus
+  # ed25519 key sandboxd just wrote to priv_validator_key.json — that key
+  # is the one CometBFT signs blocks with for this node, so registering
+  # a different key would deadlock the chain at height 1.
+  local consensus_pubkey
+  consensus_pubkey=$(jq -r '.pub_key.value' \
+    "$COSMOS_CFG_DIR/local/config/priv_validator_key.json")
+  [[ -n "$consensus_pubkey" && "$consensus_pubkey" != "null" ]] \
+    || die "Failed to read consensus pubkey from priv_validator_key.json"
+
+  # Patch denoms (mostly defaults on sandbox), IFT authority, and PoA
+  # validator/admin. patch-genesis.jq must run BEFORE the chain starts so
+  # PoA validation passes when sandboxd loads the genesis.
+  log "Patching Cosmos genesis (denoms → uatom, ift authority → validator, PoA validator)..."
   patch_cosmos_genesis "$COSMOS_CFG_DIR/patch-genesis.jq" \
-    --arg validator_addr "$validator_addr"
+    --arg validator_addr   "$validator_addr" \
+    --arg consensus_pubkey "$consensus_pubkey"
 
-  run_in cosmos "$COSMOS_BINARY" genesis gentx validator "$COSMOS_VALIDATOR_STAKE" \
-    --chain-id "$COSMOS_CHAIN_ID" --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null
-  run_in cosmos "$COSMOS_BINARY" genesis collect-gentxs --home "$COSMOS_HOME" 2>/dev/null
+  # gentx + collect-gentxs intentionally omitted: sandbox is PoA-driven, so
+  # a staking self-delegation tx wouldn't supply consensus power, and
+  # collect-gentxs's whole-genesis validation step rejects an empty
+  # poa.validators array (which is why the previous flow was failing).
 
-  # Override init's default app.toml/config.toml with the customized versions
-  # in ./cosmos/. Host-side cp because /data/config/ is bind-mounted from
-  # ./cosmos/local/config/. Reclaim ownership first — collect-gentxs above
-  # may have flipped genesis.json (and any sibling files it touches) back to
-  # root via tmpfile+rename, and cp -T over a root-owned dest fails on Linux.
+  # Re-cp the customized app.toml / config.toml after init's --overwrite
+  # clobbered them. _ensure_host_owns_cosmos_local first because patch
+  # rewrites genesis.json via tmpfile+rename and may flip sibling
+  # ownership to root on Linux.
   _ensure_host_owns_cosmos_local
   cp "$COSMOS_CFG_DIR/app.toml"    "$COSMOS_CFG_DIR/local/config/app.toml"
   cp "$COSMOS_CFG_DIR/config.toml" "$COSMOS_CFG_DIR/local/config/config.toml"
@@ -117,7 +150,7 @@ print_status() {
   info "════════════════════════════════════════════"
   info " Chain endpoints"
   info "════════════════════════════════════════════"
-  info " Cosmos (wfchain)"
+  info " Cosmos (sandbox)"
   info "   CometBFT RPC : http://localhost:26657"
   info "   REST API      : http://localhost:1317"
   info "   gRPC          : localhost:9090"

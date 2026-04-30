@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup.sh — boot a Cosmos (wfchain) + Besu (Ethereum) devnet and wire up
+# setup.sh — boot a Cosmos (sandbox) + Besu (Ethereum) devnet and wire up
 #            IBC between them using cosmos/solidity-ibc-eureka.
 #
 # Usage:
@@ -47,7 +47,7 @@ echo "[$(date '+%H:%M:%S')] Logging to $LOG_FILE"
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$SCRIPT_DIR")}"
 
 # Docker images — exported so docker-compose.yml picks them up via ${VAR:-default}.
-export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/wfchain:latest}"
+export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/sandbox-ledger:latest}"
 export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:25.4.0}"
 export FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:latest}"
 export BUN_IMAGE="${BUN_IMAGE:-oven/bun:1}"
@@ -55,11 +55,17 @@ export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}"
 export ATTESTOR_IMAGE="${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}"
 export PROOF_API_IMAGE="${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}"
 
-# Cosmos (wfchain)
+# Cosmos (sandbox)
 COSMOS_CHAIN_ID="cosmos-1"
-COSMOS_BINARY="wfchaind"
+# The cosmos image's ENTRYPOINT is `["sandboxd","start"]` (the chain binary
+# baked together with its default subcommand), so appending `init …` to
+# `docker compose run` would still run `start` and choke on the missing
+# genesis. We override the entrypoint to just the binary on every run_in
+# call — keep COSMOS_BINARY in sync if the image changes.
+COSMOS_BINARY="sandboxd"
+export RUN_IN_ENTRYPOINT="$COSMOS_BINARY"
 COSMOS_HOME="/data"
-COSMOS_BECH32_PREFIX="wf"
+COSMOS_BECH32_PREFIX="cosmos"
 COSMOS_DENOM="uatom"
 COSMOS_VALIDATOR_STAKE="1000000000uatom"      # 1 000 ATOM
 COSMOS_VALIDATOR_BALANCE="10000000000uatom"   # 10 000 ATOM (validator + fees)
@@ -146,9 +152,9 @@ cmd_demo() {
 
   # Resolve client IDs from the running chain if missing.
   if [[ -z "${COSMOS_CLIENT_ID:-}" ]]; then
-    COSMOS_CLIENT_ID=$(docker compose run --rm --no-deps --entrypoint="" cosmos \
-      wfchaind query ibc client states --home /data --node tcp://cosmos:26657 \
-      --output json 2>/dev/null | jq -r '.client_states[].client_id' 2>/dev/null \
+    COSMOS_CLIENT_ID=$(run_in cosmos query ibc client states --home /data \
+      --node tcp://cosmos:26657 --output json 2>/dev/null \
+      | jq -r '.client_states[].client_id' 2>/dev/null \
       | grep "^attestations-" | tail -1 || true)
     [[ -n "$COSMOS_CLIENT_ID" ]] || die "COSMOS_CLIENT_ID unknown — run './setup.sh ibc' first"
     echo "COSMOS_CLIENT_ID=$COSMOS_CLIENT_ID" >> "$IBC_STATE_FILE"
