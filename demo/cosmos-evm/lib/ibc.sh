@@ -30,6 +30,7 @@ fetch_solidity_ibc() {
   rm -f "$tarball"
   [[ -d "$SOLIDITY_IBC_DIR" ]] || die "Extraction failed: $SOLIDITY_IBC_DIR not found"
   log "solidity-ibc-eureka source ready at $SOLIDITY_IBC_DIR"
+  state_set SOLIDITY_IBC_DIR "$SOLIDITY_IBC_DIR"
 }
 
 # Helper used by deploy_ibc_contracts + deploy_ift_contracts: look up a

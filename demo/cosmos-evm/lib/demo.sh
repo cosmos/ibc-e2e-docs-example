@@ -240,7 +240,7 @@ demo_cosmos_to_evm_transfer() {
       e_now=$(evm_erc20_balance "$erc20" "$DEMO_ETH_RECIPIENT")
       if [[ "$e_now" != "$e_before" ]]; then
         log "  EVM balance changed at ${elapsed}s — relay complete in $(( $(date +%s) - start ))s"
-        e_before="$e_now"; relayed=1; break
+        relayed=1; break
       fi
     fi
     echo -n "."

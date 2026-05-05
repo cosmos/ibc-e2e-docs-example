@@ -18,7 +18,7 @@ trusts those signatures.
 
 ```
 ┌─────────────────────────────┐                ┌─────────────────────────────┐
-│  Chain A: Cosmos (wfchain)  │   ◄────────►   │  Chain B: Ethereum (Besu)   │
+│  Chain A: Cosmos (sandbox)  │   ◄────────►   │  Chain B: Ethereum (Besu)   │
 │  CometBFT consensus         │  IBC v2 over   │  QBFT consensus (1 sealer)  │
 │  uatom + uift tokens        │   attestation  │  TestIFT ERC20 (UIFT/uift)  │
 └─────────────────────────────┘                └─────────────────────────────┘
@@ -34,10 +34,10 @@ mint/burn pair coordinated over IBC v2.
 
 ## The two chains
 
-### Chain A — Cosmos (`wfchain`)
+### Chain A — Cosmos (`sandbox`)
 
 A single-validator Cosmos SDK chain built from
-[`cosmos/wfchain`](https://github.com/cosmos/wfchain). One container,
+[`cosmos/sandbox`](https://github.com/cosmos/sandbox). One container,
 running CometBFT for consensus.
 
 | Endpoint | Port | What for |
@@ -54,7 +54,7 @@ Tokens that exist on this chain:
 
 The cosmos service has its **whole `/data/config/` directory bind-mounted
 from `./cosmos/local/config/`** on the host, so all the genesis/keys/etc
-files `wfchaind init` writes are visible to you on disk:
+files `sandboxd init` writes are visible to you on disk:
 `./cosmos/local/config/genesis.json`, `app.toml`, `config.toml`,
 `priv_validator_key.json`, etc. The jq patches that customize genesis
 (bond_denom → uatom, IFT authority → validator)
@@ -88,7 +88,7 @@ Tokens on this chain:
 
 ### On Cosmos: built-in SDK modules
 
-These are compiled into `wfchaind`. You don't deploy them; they're part
+These are compiled into `sandboxd`. You don't deploy them; they're part
 of the chain's app.
 
 | Module | Role |
@@ -99,7 +99,7 @@ of the chain's app.
 | `ift` | **Interchain Fungible Token.** Wraps tokenfactory with bridge semantics: `register-bridge`, `transfer`, mint-on-receive. Authority is set to the validator at genesis (so `--from validator` works without a gov proposal). |
 | `27-gmp` | **General Message Passing** on port `gmpport`. Both directions of IFT route through here — IFT packets are *not* ICS-20. |
 | `26-router` (ibc-go IBC v2) | Packet router; dispatches inbound packets to the right app (here: GMP). |
-| `02-client` + `attestations` | The light client framework. The actual LC for EVM is a native module compiled into wfchaind — its `ClientState` verifies attestor signatures over EVM packet commitments. |
+| `02-client` + `attestations` | The light client framework. The actual LC for EVM is a native module compiled into sandboxd — its `ClientState` verifies attestor signatures over EVM packet commitments. |
 
 ### On EVM: Solidity contracts on Besu
 
@@ -162,7 +162,7 @@ clients.
 ### Cosmos → EVM (you have `uift`, want IFT on EVM)
 
 ```
-1. wfchaind tx ift transfer uift attestations-0 0xRECIPIENT 1000000 <timeout>
+1. sandboxd tx ift transfer uift attestations-0 0xRECIPIENT 1000000 <timeout>
    └─ ift module burns 1000000 uift from your account
    └─ ift module asks 27-gmp to send a packet on port "gmpport"
    └─ Cosmos emits SendPacket(sequence=N, srcClient=attestations-0, dstClient=client-0)
@@ -194,7 +194,7 @@ clients.
 
 ```
 1. cast send TestIFT "iftTransfer(string,string,uint256,uint64)"
-              client-0 wf1...recipient 1000000 <timeout>
+              client-0 cosmos1...recipient 1000000 <timeout>
    └─ TestIFT burns 1000000 from msg.sender
    └─ Builds a cosmostx payload via CosmosIFTSendCallConstructor
         (encodes MsgIFTMint{coin, receiver, signer: ICA})
@@ -216,9 +216,9 @@ clients.
    IBC core dispatches to 27-gmp
      └─ Decodes the inner MsgIFTMint
      └─ The ICA (signer) is authorised, MsgIFTMint runs
-        └─ tokenfactory mints 1000000 uift to wf1...recipient
+        └─ tokenfactory mints 1000000 uift to cosmos1...recipient
 
-5. wf1...recipient now holds 1000000 uift on Cosmos.
+5. cosmos1...recipient now holds 1000000 uift on Cosmos.
 ```
 
 The demo's status tracker polls for ≤120 s on Cosmos→EVM and ≤300 s
@@ -227,11 +227,11 @@ on EVM→Cosmos.
 The two key addresses to keep separate in the EVM→Cosmos direction
 (easy to confuse, breaks minting silently if you swap them):
 
-- **ICA** (queried via `wfchaind query gmp get-address <client> <TestIFT> ""`)
+- **ICA** (queried via `sandboxd query gmp get-address <client> <TestIFT> ""`)
   is the *signer* of MsgIFTMint on Cosmos. Baked into
   `CosmosIFTSendCallConstructor`.
 - **Cosmos IFT module account** (queried via
-  `wfchaind query auth module-account ift`) is the `.sender` field in
+  `sandboxd query auth module-account ift`) is the `.sender` field in
   GMP packets *from* Cosmos. Stored as `counterpartyIFTAddress` in
   `TestIFT.registerIFTBridge` so the auth check on the EVM side passes.
 
@@ -248,10 +248,27 @@ From this directory:
 # Just the chains (no IBC wiring) — useful if you want to poke at them manually.
 ./setup.sh chains
 
-# IBC wiring on chains that are already running.
+# IBC wiring on chains that are already running (all steps in one go).
 ./setup.sh ibc
+```
 
-# Run individual demo scenarios.
+### Step-by-step (recommended for tutorials)
+
+Each step is idempotent — safe to re-run if something fails.
+
+```bash
+./setup.sh chains           # 1. start Cosmos + Besu
+
+./setup.sh deploy           # 2. fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh attestors        # 3. generate keystore + configs, start attestors
+./setup.sh relayer          # 4. copy keys, run DB migrations, start relayer + proof-api
+./setup.sh create-clients   # 5. create attestation light clients on both chains
+./setup.sh wire             # 6. register counterparties + IFT bridges + finalise config
+```
+
+### Demos
+
+```bash
 ./setup.sh demo cosmos-evm   # Cosmos → EVM IFT transfer
 ./setup.sh demo evm-cosmos   # EVM → Cosmos IFT transfer
 ./setup.sh demo all          # the full set
@@ -261,7 +278,11 @@ From this directory:
 
 # Stop containers and wipe data.
 ./setup.sh clean
+```
 
+### Advanced
+
+```bash
 # Use the trimmed deploy script (drops unused upstream contracts):
 DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol ./setup.sh
 
@@ -318,7 +339,7 @@ After a setup run, you'll find:
 
 | Path | Created by | Contents |
 |------|-----------|---------|
-| `cosmos/local/config/` | `wfchaind init` (bind-mounted) | genesis, app.toml, config.toml, priv_validator_key, etc |
+| `cosmos/local/config/` | `sandboxd init` (bind-mounted) | genesis, app.toml, config.toml, priv_validator_key, etc |
 | `cosmos/local/ibc_*_state.json` | Phase 4B5b | rendered LC ClientState + ConsensusState |
 | `ibc/local/{config.yml,keys.json,relayer.json,attestor*.toml,.ibc-attestor/}` | Phase 4D/4D1/keystore generator | relayer + attestor + proof-api configs |
 | `ibc/state.env` | every phase via `state_set` | accumulated addresses + IDs (no duplicates — `state_set` does in-place key replace) |

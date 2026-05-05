@@ -1,8 +1,8 @@
 # Cosmos ↔ EVM IBC Demo
 
 End-to-end demo of bidirectional IBC v2 token transfers between a Cosmos chain
-(`wfchain`) and an Ethereum devnet (Hyperledger Besu, single-validator QBFT). Transfers use
-wfchain's **IFT** (Interchain Fungible Token) module — a tokenfactory-backed
+(`sandbox`) and an Ethereum devnet (Hyperledger Besu, single-validator QBFT). Transfers use
+sandbox's **IFT** (Interchain Fungible Token) module — a tokenfactory-backed
 mint/burn bridge that rides on top of **ICS27 GMP** (General Message Passing,
 port `gmpport`), not standard ICS20. **Attestation-based light clients secure
 both directions**: an `AttestationLightClient` on EVM verifies Cosmos state, and
@@ -51,13 +51,13 @@ graph LR
 
 ### 2. Cosmos-side modules
 
-What's inside `wfchaind`, and how IFT packets route out. The attestation light
+What's inside `sandboxd`, and how IFT packets route out. The attestation light
 client tracks EVM state; the IFT module mints/burns a tokenfactory denom and
 hands packets to GMP.
 
 ```mermaid
 graph LR
-    subgraph Cosmos["wfchaind modules"]
+    subgraph Cosmos["sandboxd modules"]
         Bank["bank<br/>(uift supply)"]
         TF["tokenfactory<br/>create-denom / mint / burn"]
         IFT["ift<br/>register-bridge / transfer<br/>(authority = validator)"]
@@ -109,7 +109,7 @@ graph LR
 
 | Service | Image | Ports | Role |
 |---------|-------|-------|------|
-| `cosmos` | `ghcr.io/cosmos/wfchain:latest` | 26657 RPC · 1317 REST · 9090 gRPC | Cosmos chain node |
+| `cosmos` | `ghcr.io/cosmos/sandbox:latest` | 26657 RPC · 1317 REST · 9090 gRPC | Cosmos chain node |
 | `besu` | `hyperledger/besu:26.2.0` | 8545 JSON-RPC · 8546 WS | Ethereum node — single-validator QBFT (no separate consensus layer) |
 | `relayer` | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | 3000 gRPC API · 9100 metrics | Bidirectional IBC packet relay |
 | `attestor` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Besu — signs EVM state attestations for the attestations LC on Cosmos |
@@ -140,7 +140,7 @@ attestations-N                      client-N
 
 ```
 User
- │  wfchaind tx ift transfer uift attestations-0 <0xrecipient> <amount> <timeout>
+ │  sandboxd tx ift transfer uift attestations-0 <0xrecipient> <amount> <timeout>
  ▼
 Cosmos IFT module
  ├─ burns <amount> uift from sender
@@ -190,7 +190,7 @@ Proof API (eth_to_cosmos)
         │ returns signed attestation
         ▼
 Relayer submits MsgRecvPacket
- └─ wfchaind tx                          → cosmos:26657
+ └─ sandboxd tx                          → cosmos:26657
        │ attestations LC verifies signature
        └─ GMP/IFT module decodes payload + executes MsgIFTMint
              └─ tokenfactory mints <amount> uift to <wf1…receiver>
@@ -199,9 +199,9 @@ Relayer submits MsgRecvPacket
 Two addresses worth calling out explicitly in the EVM→Cosmos direction (easy to
 confuse — failing to separate them silently breaks minting):
 
-- **ICA** (from `wfchaind query gmp get-address <client> <TestIFT> ""`): the
+- **ICA** (from `sandboxd query gmp get-address <client> <TestIFT> ""`): the
   signer of `MsgIFTMint` on Cosmos. Baked into `CosmosIFTSendCallConstructor`.
-- **Cosmos IFT module account** (from `wfchaind query auth module-account ift`):
+- **Cosmos IFT module account** (from `sandboxd query auth module-account ift`):
   the `.sender` in GMP packets FROM Cosmos. Stored as `counterpartyIFTAddress`
   in `TestIFT.registerIFTBridge` so `iftMint`'s auth check passes on the return
   leg.
@@ -226,12 +226,12 @@ files at each run — don't edit them by hand.
 
 The cosmos service has its **whole `/data/config/` directory bind-mounted from
 `./cosmos/local/config/`** on the host (see `docker-compose.yml`). That means
-`wfchaind init`, `add-genesis-account`, `gentx`, `collect-gentxs`, and the jq
+`sandboxd init`, `add-genesis-account`, `gentx`, `collect-gentxs`, and the jq
 patches all read+write the same files in place — no `docker cp` roundtrip. The
 canonical `app.toml`/`config.toml` in `./cosmos/` are copied to
 `./cosmos/local/config/` (host-side `cp`) right after init to override
 init's defaults; everything else (`genesis.json`, `priv_validator_key.json`,
-`node_key.json`, `client.toml`) is whatever wfchaind itself wrote.
+`node_key.json`, `client.toml`) is whatever sandboxd itself wrote.
 
 The Cosmos genesis is patched in-place (not rendered) using `cosmos/patch-genesis.jq`
 running directly against the host file: rewrites bond_denom → uatom and sets
@@ -247,7 +247,7 @@ post-template additions:
 | `COSMOS_CLIENT_ID` | `create_ibc_clients` / `wait_for_ibc_ready` | `attestations-N` on Cosmos |
 | `EVM_CLIENT_ID` | `create_evm_ibc_client` / `wait_for_evm_client` | `client-N` on EVM |
 | `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | TestIFT proxy on EVM. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — aligned with the Cosmos `uift` denom so balances on both sides show matching names |
-| `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — wfchain's tokenfactory doesn't use `factory/…/…` in lookups). Same logical token as EVM `UIFT` — the bridge maps them 1:1 |
+| `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — sandbox's tokenfactory doesn't use `factory/…/…` in lookups). Same logical token as EVM `UIFT` — the bridge maps them 1:1 |
 | `DEMO_TRANSFER_AMOUNT` | `register_ift_bridges` | rewritten to `<N>uift` so demos exercise IFT by default |
 | `IFT_ICA_ADDRESS` | `register_evm_ift_bridge` | ICA bech32 — MsgIFTMint signer on Cosmos side, baked into CosmosIFTSendCallConstructor |
 | `IFT_CTOR_ADDR` | `register_evm_ift_bridge` | Deployed `CosmosIFTSendCallConstructor` address |
@@ -279,8 +279,8 @@ demo/cosmos-evm/
                               print_balance_curl_cmds (copy-pasteable curls for the user)
 
   cosmos/                   — Cosmos chain inputs
-    app.toml, config.toml   — canonical wfchain / CometBFT config; cp'd to
-                              cosmos/local/config/ after wfchaind init writes its defaults
+    app.toml, config.toml   — canonical sandbox / CometBFT config; cp'd to
+                              cosmos/local/config/ after sandboxd init writes its defaults
     patch-genesis.jq        — jq transform: bond_denom + IFT module authority → validator address
     local/                    — runtime cosmos files (gitignored)
       config/                   — bind-mounted to /data/config/ in the cosmos
@@ -364,7 +364,7 @@ All tags pin to `${VAR:-default}` in `setup.sh` — override any variable to use
 
 | Image | Variable | Purpose |
 |-------|----------|---------|
-| `ghcr.io/cosmos/wfchain:latest` | `COSMOS_IMAGE` | Cosmos chain node + CLI |
+| `ghcr.io/cosmos/sandbox:latest` | `COSMOS_IMAGE` | Cosmos chain node + CLI |
 | `hyperledger/besu:26.2.0` | `BESU_IMAGE` | Ethereum node — single-validator QBFT (no CL) |
 | `ghcr.io/foundry-rs/foundry:latest` | `FOUNDRY_IMAGE` | `forge script` deploy + `cast` calls |
 | `oven/bun:1` | `BUN_IMAGE` | `bun install` for solidity-ibc-eureka deps |
@@ -424,7 +424,7 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 # Init and start chains only (skip IBC)
 ./setup.sh chains
 
-# Set up IBC on already-running chains
+# Set up IBC on already-running chains (all steps in one go)
 ./setup.sh ibc
 
 # Run demo scenarios
@@ -442,11 +442,39 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 ./setup.sh clean
 ```
 
+### Step-by-step IBC setup
+
+For tutorials or debugging, each IBC phase can be run individually.
+All commands are idempotent — re-running a step skips already-completed work.
+
+```bash
+./setup.sh chains           # start Cosmos + Besu
+
+./setup.sh deploy           # fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh attestors        # generate keystore + configs, start attestor-evm and attestor-cosmos
+./setup.sh relayer          # copy keys, render configs, run DB migrations, start relayer + proof-api
+./setup.sh create-clients   # create attestation light clients on both chains
+./setup.sh wire             # register counterparties + IFT bridges + finalise relayer config
+
+./setup.sh demo cosmos-evm  # Cosmos → EVM IFT transfer
+./setup.sh demo evm-cosmos  # EVM → Cosmos IFT transfer
+```
+
+Each step sources `ibc/state.env` on startup so addresses and client IDs written
+by earlier steps are available. Run steps in the same terminal session, or in
+separate sessions — state persists on disk.
+
 ### Re-running after a partial setup
 
-State is persisted in `ibc/state.env`. Individual phases are idempotent — re-running
-`setup.sh ibc` skips already-completed steps (contract deploy, client create, bridge registration)
-by checking for non-empty values in `state.env`.
+State is persisted in `ibc/state.env`. Every step and every phase within a step is
+idempotent — it checks for existing state (contract bytecode, `state.env` keys, client
+queries) and skips work that's already done.
+
+To re-run a specific step after a failure, just invoke it again:
+
+```bash
+./setup.sh create-clients   # safe to retry; skips clients that already exist
+```
 
 To force recreation of the IBC client pair (e.g. after a merkle prefix misconfiguration),
 remove the relevant lines from `state.env` before re-running:
@@ -454,40 +482,46 @@ remove the relevant lines from `state.env` before re-running:
 ```bash
 sed -i '' '/^COSMOS_CLIENT_ID=/d' ibc/state.env
 sed -i '' '/^EVM_CLIENT_ID=/d'  ibc/state.env
-./setup.sh ibc
+./setup.sh create-clients
+./setup.sh wire             # re-register counterparties after new client IDs
 ```
 
 ---
 
 ## Setup Phases
 
-| Phase | Function | Source | Description |
-|-------|----------|--------|-------------|
-| 1A | `init_cosmos` | `lib/chains.sh` | Cosmos init, validator + relayer keys, **genesis patch** (bond_denom → uatom, IFT authority → validator), gentx + collect-gentxs |
-| 1B | `init_ethereum` | `lib/chains.sh` | Start Besu (QBFT consensus runs internally — single validator keyed by `evm/key`, address baked into `el-genesis.json` extraData; no CL/Engine API) |
-| 2 | `start_services` | `lib/chains.sh` | `docker compose up -d cosmos` (Besu already running) |
-| 3 | `wait_for_services` | `lib/chains.sh` | Poll cosmos status + besu `eth_blockNumber` |
-| 4A0 | `fetch_solidity_ibc` | `lib/ibc.sh` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`) |
-| 4A | `deploy_ibc_contracts` | `lib/ibc.sh` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
-| 4A1 | `deploy_ift_contracts` | `lib/ibc.sh` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
-| 4C | `setup_relayer_key` | `lib/ibc.sh` | Resolve relayer bech32 address; copy Cosmos keyring into relayer-data volume |
-| 4B5a | `reconcile_ibc_client_pair` | `lib/ibc.sh` | Verify persisted `COSMOS_CLIENT_ID` ↔ `EVM_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |
-| 4B5b | `create_ibc_clients` | `lib/ibc.sh` | Submit `MsgCreateClient` with attestation ClientState (rendered to `cosmos/local/ibc_*_state.json`); poll for commit via REST indexer |
-| 4D | `generate_relayer_config` | `lib/ibc.sh` | Render `config.yml` + `keys.json` from templates (initial pass; finalized in 4F4 once both client IDs are known) |
-| 4D1 | `generate_proof_api_config` + attestor configs | `lib/ibc.sh` | Render `relayer.json`, `attestor-config.toml`, `attestor-cosmos-config.toml` BEFORE start_relayer — relayer depends_on proof-api → attestor + attestor-cosmos, all of which bind-mount these host files; missing files would make compose either create a directory at the mount path or crash-loop the attestors |
-| 4E0 | `_wait_for_postgres` + `run_db_migrations` | `lib/ibc.sh` | `docker compose up -d postgres`, poll `pg_isready`, then `migrate up` against the schema from `cosmos/ibc-relayer@<OPERATOR_IMAGE tag>` |
-| 4E | `start_relayer` | `lib/ibc.sh` | `docker compose up -d relayer` (transitively starts proof-api + both attestors via depends_on) |
-| 4E1 | `start_attestor` | `lib/ibc.sh` | Re-render attestor config, ensure keystore, `docker compose up -d attestor` (EVM watcher) |
-| 4E1a | `start_attestor_cosmos` | `lib/ibc.sh` | Re-render config, `docker compose up -d attestor-cosmos` (Cosmos watcher, same keystore as EVM watcher) |
-| 4E2 | `start_proof_api` | `lib/ibc.sh` | `docker compose up -d proof-api` (attested mode in both directions) |
-| 4E3 | `create_evm_ibc_client` | `lib/ibc.sh` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)` (merklePrefix MUST be `[0x]` length 1 — see code comment) |
-| 4F | `wait_for_ibc_ready` | `lib/ibc.sh` | Poll Cosmos REST `/ibc/core/client/v1/client_states` for any `attestations-*` client |
-| 4F1 | `wait_for_evm_client` | `lib/ibc.sh` | Poll `ICS26Router.getNextClientSeq()` until > 0; takes the most recently added client as `client-$((next_seq - 1))` (handles chains where addClient has been called more than once — earlier versions hardcoded `client-0` and silently picked the wrong client on partial-state re-runs) |
-| 4F2 | `register_counterparty` | `lib/ibc.sh` | Cosmos-side `add-counterparty attestations-N client-N` |
-| 4F3 | `register_ift_bridges` | `lib/ibc.sh` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT-checksummed> evm` (EIP-55 checksum is critical — wfchain x/ift does plain string compare against ICS27GMP's checksummed sender). Uses `cosmos_tx_and_wait` so each tx is poll-confirmed before the next fires. Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
-| 4F3a | `register_evm_ift_bridge` | `lib/ibc.sh` | (1) `wfchaind query gmp get-address <client> <TestIFT-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased — different casing produces a different ICA, silently breaking the mint). (2) `wfchaind query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)` via `cast --create` from compiled bytecode. (4) `TestIFT.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
-| 4F4 | `finalize_relayer_config` | `lib/ibc.sh` | Re-render `config.yml` now that both client IDs are known; restart relayer |
-| 4G | `demo_all` | `lib/demo.sh` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands (`print_balance_curl_cmds`) before broadcasting so you can re-query balances live. Direction-aware polling: cosmos→evm caps at 120s, evm→cosmos caps at 300s. `demo_failure_and_retry` waits exactly until the packet's TTL has expired (precise wait based on `short_ts`, not a fixed 75s sleep). `demo_observability` probes relayer/attestor endpoints from inside `ibc-net` via `curl_in_net` since none of those ports are published on the host. |
+The table maps each internal phase to the `setup.sh` step command that runs it.
+
+| Phase | Function | Step command | Description |
+|-------|----------|--------------|-------------|
+| 1A | `init_cosmos` | `chains` | Cosmos init, validator + relayer keys, **genesis patch** (bond_denom → uatom, IFT authority → validator), gentx + collect-gentxs |
+| 1B | `init_ethereum` | `chains` | Start Besu (QBFT consensus runs internally — single validator keyed by `evm/key`, address baked into `el-genesis.json` extraData; no CL/Engine API) |
+| 2 | `start_services` | `chains` | `docker compose up -d cosmos` (Besu already running) |
+| 3 | `wait_for_services` | `chains` | Poll cosmos status + besu `eth_blockNumber` |
+| 4A0 | `fetch_solidity_ibc` | `deploy` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`); persists `SOLIDITY_IBC_DIR` to `state.env` |
+| 4A | `deploy_ibc_contracts` | `deploy` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
+| 4A1 | `deploy_ift_contracts` | `deploy` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
+| 4E1 | `_ensure_attestor_keystore` | `attestors` | Generate Web3 v3 JSON keystore for the attestor signing key (idempotent) |
+| 4D1a | `generate_attestor_config` | `attestors` | Render `attestor-config.toml` (EVM watcher config) |
+| 4D1b | `generate_attestor_cosmos_config` | `attestors` | Render `attestor-cosmos-config.toml` (Cosmos watcher config) |
+| 4E1 | `start_attestor` | `attestors` | `docker compose up -d attestor` (EVM watcher) |
+| 4E1a | `start_attestor_cosmos` | `attestors` | `docker compose up -d attestor-cosmos` (Cosmos watcher, same keystore) |
+| 4C | `setup_relayer_key` | `relayer` | Resolve relayer bech32 address; copy Cosmos keyring into relayer-data volume |
+| 4D | `generate_relayer_config` | `relayer` | Render `config.yml` + `keys.json` from templates (initial pass with empty client IDs; finalized in Phase 4F4) |
+| 4D1 | `generate_proof_api_config` | `relayer` | Render `relayer.json` — must exist before `docker compose up relayer` to avoid compose creating a directory at the bind-mount path |
+| 4E0 | `_wait_for_postgres` + `run_db_migrations` | `relayer` | `docker compose up -d postgres`, poll `pg_isready`, then `migrate up` against the schema from `cosmos/ibc-relayer@<OPERATOR_IMAGE tag>` |
+| 4E | `start_relayer` | `relayer` | `docker compose up -d relayer` |
+| 4E2 | `start_proof_api` | `relayer` | `docker compose up -d proof-api` (attested mode in both directions) |
+| 4B5a | `reconcile_ibc_client_pair` | `create-clients` | Verify persisted `COSMOS_CLIENT_ID` ↔ `EVM_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |
+| 4B5b | `create_ibc_clients` | `create-clients` | Submit `MsgCreateClient` with attestation ClientState (rendered to `cosmos/local/ibc_*_state.json`); poll for commit via REST indexer |
+| 4E3 | `create_evm_ibc_client` | `create-clients` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)` |
+| 4F | `wait_for_ibc_ready` | `create-clients` | Poll Cosmos REST `/ibc/core/client/v1/client_states` for any `attestations-*` client |
+| 4F1 | `wait_for_evm_client` | `create-clients` | Poll `ICS26Router.getNextClientSeq()` until > 0; derives `client-$((next_seq - 1))` |
+| 4F2 | `register_counterparty` | `wire` | Cosmos-side `add-counterparty attestations-N client-N` |
+| 4F3 | `register_ift_bridges` | `wire` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT-checksummed> evm` (EIP-55 checksum is critical — sandbox x/ift does plain string compare against ICS27GMP's checksummed sender). Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
+| 4F3a | `register_evm_ift_bridge` | `wire` | (1) `sandboxd query gmp get-address <client> <TestIFT-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased). (2) `sandboxd query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)`. (4) `TestIFT.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
+| 4F4 | `finalize_relayer_config` | `wire` | Re-render `config.yml` now that both client IDs are known; restart relayer |
+| 4G | `demo_all` | `demo` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands before broadcasting. Direction-aware polling: cosmos→evm caps at 120s, evm→cosmos caps at 300s. |
 
 All on-chain Cosmos txs run through `cosmos_tx_and_wait` (in `lib/common.sh`)
 which polls `/cosmos/tx/v1beta1/txs/<hash>` until commit, surfaces the chain's
