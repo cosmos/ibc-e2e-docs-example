@@ -680,6 +680,14 @@ register_ift_bridges() {
   if [[ -z "$COSMOS_IFT_DENOM" ]]; then
     COSMOS_IFT_DENOM="uift"
   fi
+
+  # MsgRegisterIFTBridge requires a full tokenfactory denom (factory/<creator>/<subdenom>).
+  # Resolve it now so all queries and txs below use the canonical form.
+  local subdenom="${COSMOS_IFT_DENOM##*/}"
+  local validator_addr
+  validator_addr=$(run_in cosmos keys show validator -a \
+    --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
+  COSMOS_IFT_DENOM="factory/${validator_addr}/${subdenom}"
   log "  Cosmos IFT denom: $COSMOS_IFT_DENOM"
 
   local existing_bridge
@@ -687,7 +695,7 @@ register_ift_bridges() {
     "$COSMOS_IFT_DENOM" "$COSMOS_CLIENT_ID" \
     --node tcp://localhost:26657 -o json 2>/dev/null \
     | jq -r '.bridge.counterparty_ift_address // empty' 2>/dev/null || echo "")
-  
+
   local ift_addr_checksum
   ift_addr_checksum=$(cast_in_net to-check-sum-address "$IFT_CONTRACT_ADDR" 2>/dev/null \
     | tr -d '[:space:]') || ift_addr_checksum=""
@@ -707,14 +715,10 @@ register_ift_bridges() {
   if [[ -n "$existing_bridge" ]]; then
     log "Cosmos IFT bridge already registered (→ $existing_bridge) — skipping create-denom + register-bridge"
   else
-    local subdenom="${COSMOS_IFT_DENOM##*/}"
-    local validator_addr
-    validator_addr=$(run_in cosmos keys show validator -a \
-      --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
     if docker compose exec -T cosmos sandboxd query tokenfactory denoms-by-creator \
          "$validator_addr" --node tcp://localhost:26657 -o json 2>/dev/null \
-         | jq -e --arg s "$subdenom" '.denoms[]? | select(. == $s)' >/dev/null 2>&1; then
-      log "  Denom '$subdenom' already created by validator — skipping create-denom"
+         | jq -e --arg s "$COSMOS_IFT_DENOM" '.denoms[]? | select(. == $s)' >/dev/null 2>&1; then
+      log "  Denom '$COSMOS_IFT_DENOM' already created by validator — skipping create-denom"
     else
       log "  Creating tokenfactory denom '$subdenom'..."
       cosmos_tx_and_wait tx tokenfactory create-denom "$subdenom" \
@@ -852,7 +856,7 @@ register_evm_ift_bridge() {
   # MsgIFTMint type URL + tokenfactory denom match sandbox's x/ift + tokenfactory
   # wiring; keeping them together here so the constructor matches what
   # CosmosIFTSendCallConstructor expects on the other side.
-  local type_url="/sandbox.ift.MsgIFTMint"
+  local type_url="/ibc.applications.prototypes.ift.v1.MsgIFTMint"
 
   log "  Encoding constructor args (typeUrl, denom, ica)..."
   local ctor_args

@@ -116,7 +116,7 @@ evm_erc20_approve() {
 
 # Poll a Cosmos bank balance until it differs from the baseline.
 wait_for_cosmos_relay() {
-  local addr="$1" denom="$2" before="$3" max="${4:-150}" step="${5:-5}"
+  local addr="$1" denom="$2" before="$3" max="${4:-180}" step="${5:-5}"
   log "  ── Waiting for relay (up to ${max}s) ────────────────────────────────"
   local start elapsed=0
   start=$(date +%s)
