@@ -140,23 +140,15 @@ deploy_ift_contracts() {
 }
 
 # ─── Phase 4C ────────────────────────────────────────────────────────────────
-# Read the relayer's bech32 address; copy the cosmos keyring-test directory
-# into the relayer-data named volume so the relayer can sign Cosmos txs.
+# Read the relayer's bech32 address. The cosmos keyring is bind-mounted
+# read-only into the relayer container at /relayer/cosmos-keys/keyring-test
+# (see docker-compose.yml), so no copy is needed here.
 setup_relayer_key() {
   log "Resolving relayer wallet on Cosmos..."
   RELAYER_ADDR=$(run_in cosmos keys show relayer -a \
     --keyring-backend test --home "$COSMOS_HOME")
   log "Relayer wallet: $RELAYER_ADDR"
   state_set RELAYER_ADDR "$RELAYER_ADDR"
-
-  # Relayer signs Cosmos txs from /relayer/cosmos-keys; copy the keyring across.
-  log "Populating relayer cosmos keyring (relayer-data volume)..."
-  docker run --rm \
-    -v "${COMPOSE_PROJECT}_cosmos-data:/cosmos-data:ro" \
-    -v "${COMPOSE_PROJECT}_relayer-data:/relayer" \
-    busybox \
-    sh -c "mkdir -p /relayer/cosmos-keys && cp -r /cosmos-data/keyring-test /relayer/cosmos-keys/"
-  log "Relayer cosmos keyring ready"
 }
 
 # ─── Phase 4B5a ──────────────────────────────────────────────────────────────

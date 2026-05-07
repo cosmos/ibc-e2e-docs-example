@@ -40,6 +40,10 @@ init_cosmos() {
   # this directory; we then overwrite app.toml / config.toml with our
   # customized versions and apply jq patches to genesis.json.
   mkdir -p "$COSMOS_CFG_DIR/local/config"
+  # docker-compose.yml bind-mounts ./cosmos/local/keyring-test into both
+  # cosmos and relayer containers; pre-create it so docker doesn't make
+  # the host dir root-owned on Linux.
+  mkdir -p "$COSMOS_CFG_DIR/local/keyring-test"
 
   # Always sync our customized app.toml / config.toml — this happens before
   # the idempotency guard so edits to ./cosmos/{app,config}.toml apply on

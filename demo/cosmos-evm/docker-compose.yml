@@ -21,6 +21,9 @@ services:
       - cosmos-data:/data
       - ./cosmos:/cosmos-config:ro
       - ./cosmos/local/config:/data/config
+      # Bind-mount the keyring on the host so the relayer can mount the same
+      # path read-only — avoids a docker-volume → docker-volume copy step.
+      - ./cosmos/local/keyring-test:/data/keyring-test
     networks:
       - ibc-net
     restart: on-failure
@@ -83,9 +86,14 @@ services:
     environment:
       POSTGRES_USER: relayer
       POSTGRES_PASSWORD: relayer
+    ports:
+      - "9100:9100"
     volumes:
       - ./ibc:/home/nonroot/config:ro
       - relayer-data:/relayer
+      # Same keyring directory the cosmos container writes to, mounted
+      # read-only so the relayer can sign txs without copying the keys.
+      - ./cosmos/local/keyring-test:/relayer/cosmos-keys/keyring-test:ro
     networks:
       - ibc-net
     depends_on:
