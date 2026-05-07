@@ -194,6 +194,51 @@ cmd_wire() {
   log "IBC wiring complete. Run './setup.sh demo cosmos-evm' or './setup.sh demo evm-cosmos'."
 }
 
+cmd_help() {
+  cat <<'EOF'
+setup.sh — boot Cosmos (sandbox) + Besu (Ethereum) and wire up IBC between them.
+
+USAGE:
+  ./setup.sh [COMMAND] [ARGS]
+
+TOP-LEVEL:
+  (no args)         Run end-to-end: init chains, start everything, set up IBC
+  chains            Init + start chains only (skip IBC)
+  ibc               Set up IBC on already-running chains (all steps)
+  status            Print RPC endpoints and block heights
+  clean             Stop containers and remove all data
+  help              Show this message
+
+IBC STEP-BY-STEP (run in order on already-running chains):
+  deploy            Step 1/5: fetch source + deploy IBC/IFT contracts on Besu
+  attestors         Step 2/5: generate keystores/configs + start attestor services
+  relayer           Step 3/5: copy keys, render configs, run DB migrations,
+                              start relayer + proof-api
+  create-clients    Step 4/5: create attestation light clients on both chains
+  wire              Step 5/5: register counterparties + IFT bridges +
+                              finalise relayer config
+
+DEMOS:
+  transfer          Run cosmos↔evm IFT transfers (alias for `demo transfer`)
+  demo [SUB]        Run user-story demos. SUB is one of:
+                      transfer    — both directions
+                      cosmos-evm  — Cosmos → EVM IFT transfer
+                      evm-cosmos  — EVM → Cosmos IFT transfer
+                      track       — packet status tracking
+                      failure     — failure + retry path
+                      observe     — observability tour
+                      all         — run all demos (default)
+
+ENVIRONMENT (optional):
+  SOLIDITY_IBC_DIR        Local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
+  ICS26_ROUTER_ADDR       Skip forge deploy
+  EVM_ATTESTATION_LC_ADDR Skip AttestationLightClient deploy
+
+REQUIREMENTS:
+  docker (compose plugin), jq, curl, perl, forge
+EOF
+}
+
 cmd_chains() {
   check_prerequisites
   log "╔══════════════════════════════════════════════════╗"
@@ -261,6 +306,7 @@ main() {
       cmd_chains
       run_phase "Phase 4: IBC setup" setup_ibc
       ;;
+    help|-h|--help) cmd_help ;;
     clean)          clean ;;
     status)         print_status ;;
     chains)
@@ -275,7 +321,7 @@ main() {
     ibc)            cmd_ibc ;;
     transfer)       cmd_demo transfer ;;
     demo)           shift; cmd_demo "$@" ;;
-    *)              die "Unknown command: $1 (run './setup.sh' with no args, or see header for usage)" ;;
+    *)              die "Unknown command: $1 (run './setup.sh help' for usage)" ;;
   esac
 }
 

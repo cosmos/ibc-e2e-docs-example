@@ -418,6 +418,9 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 ### Commands
 
 ```bash
+# Print all available commands and environment variables
+./setup.sh help
+
 # Full setup: init chains, deploy contracts, configure IBC, run demos
 ./setup.sh
 

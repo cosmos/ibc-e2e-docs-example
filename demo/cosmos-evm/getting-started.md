@@ -242,6 +242,9 @@ The two key addresses to keep separate in the EVM→Cosmos direction
 From this directory:
 
 ```bash
+# Print all available commands and environment variables.
+./setup.sh help
+
 # Full bring-up: init both chains, deploy contracts, set up IBC, run a demo transfer.
 ./setup.sh
 
@@ -259,11 +262,11 @@ Each step is idempotent — safe to re-run if something fails.
 ```bash
 ./setup.sh chains           # 1. start Cosmos + Besu
 
-./setup.sh deploy           # 2. fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
-./setup.sh attestors        # 3. generate keystore + configs, start attestors
-./setup.sh relayer          # 4. copy keys, run DB migrations, start relayer + proof-api
-./setup.sh create-clients   # 5. create attestation light clients on both chains
-./setup.sh wire             # 6. register counterparties + IFT bridges + finalise config
+./setup.sh deploy           # Step 1/5: fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh attestors        # Step 2/5: generate keystore + configs, start attestors
+./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations, start relayer + proof-api
+./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
+./setup.sh wire             # Step 5/5: register counterparties + IFT bridges + finalise relayer config
 ```
 
 ### Demos
@@ -272,7 +275,10 @@ Each step is idempotent — safe to re-run if something fails.
 ./setup.sh transfer          # cosmos↔evm IFT transfers (alias for `demo transfer`)
 ./setup.sh demo cosmos-evm   # Cosmos → EVM IFT transfer
 ./setup.sh demo evm-cosmos   # EVM → Cosmos IFT transfer
-./setup.sh demo all          # the full set
+./setup.sh demo track        # packet status tracking
+./setup.sh demo failure      # timeout + retry flow
+./setup.sh demo observe      # Prometheus metrics + logs
+./setup.sh demo all          # run all demos (default)
 
 # Print current RPC endpoints and block heights.
 ./setup.sh status
@@ -281,7 +287,17 @@ Each step is idempotent — safe to re-run if something fails.
 ./setup.sh clean
 ```
 
-### Advanced
+### Environment variables
+
+Optional overrides — pre-set any of these to skip the corresponding phase or
+swap in a different artifact:
+
+| Variable | Purpose |
+|----------|---------|
+| `SOLIDITY_IBC_DIR` | Local checkout; otherwise auto-downloaded (`SOLIDITY_IBC_TAG`) |
+| `ICS26_ROUTER_ADDR` | Skip forge deploy (use a pre-deployed router) |
+| `EVM_ATTESTATION_LC_ADDR` | Skip AttestationLightClient deploy |
+| `DEPLOY_SCRIPT` | Forge deploy script (default: `scripts/E2ETestDeploy.s.sol`) |
 
 ```bash
 # Use the trimmed deploy script (drops unused upstream contracts):
