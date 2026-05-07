@@ -428,6 +428,7 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 ./setup.sh ibc
 
 # Run demo scenarios
+./setup.sh transfer          # cosmos↔evm IFT transfers (alias for `demo transfer`)
 ./setup.sh demo all          # all demos
 ./setup.sh demo cosmos-evm   # Cosmos → EVM transfer
 ./setup.sh demo evm-cosmos   # EVM → Cosmos transfer
@@ -456,6 +457,7 @@ All commands are idempotent — re-running a step skips already-completed work.
 ./setup.sh create-clients   # create attestation light clients on both chains
 ./setup.sh wire             # register counterparties + IFT bridges + finalise relayer config
 
+./setup.sh transfer         # cosmos↔evm IFT transfers (both directions)
 ./setup.sh demo cosmos-evm  # Cosmos → EVM IFT transfer
 ./setup.sh demo evm-cosmos  # EVM → Cosmos IFT transfer
 ```

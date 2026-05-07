@@ -13,6 +13,7 @@
 #   ./setup.sh relayer       — copy keys, render configs, run DB migrations, start relayer + proof-api
 #   ./setup.sh create-clients — create attestation light clients on both chains
 #   ./setup.sh wire          — register counterparties + IFT bridges + finalise relayer config
+#   ./setup.sh transfer      — run cosmos↔evm IFT transfers (alias for `demo transfer`)
 #   ./setup.sh demo [sub]    — run user-story demos
 #                              (transfer | cosmos-evm | evm-cosmos | track | failure | observe | all)
 #   ./setup.sh status        — print RPC endpoints and block heights
@@ -55,7 +56,7 @@ COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$SCRIPT_DIR")}"
 
 # Docker images — exported so docker-compose.yml picks them up via ${VAR:-default}.
 export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/sandbox-ledger:latest}"
-export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:25.4.0}"
+export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:26.2.0}"
 export FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:latest}"
 export BUN_IMAGE="${BUN_IMAGE:-oven/bun:1}"
 export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}"
@@ -255,25 +256,27 @@ cmd_demo() {
 # ─── Main ─────────────────────────────────────────────────────────────────────
 main() {
   case "${1:-}" in
-    clean)          clean; exit 0 ;;
-    status)         print_status; exit 0 ;;
+    "")
+      # No arg: end-to-end — chains then IBC.
+      cmd_chains
+      run_phase "Phase 4: IBC setup" setup_ibc
+      ;;
+    clean)          clean ;;
+    status)         print_status ;;
     chains)
       cmd_chains
       log "Both chains are live.  Run './setup.sh deploy' (or './setup.sh ibc') to set up IBC."
-      exit 0
       ;;
-    deploy)         cmd_deploy; exit 0 ;;
-    attestors)      cmd_attestors; exit 0 ;;
-    relayer)        cmd_relayer; exit 0 ;;
-    create-clients) cmd_create_clients; exit 0 ;;
-    wire)           cmd_wire; exit 0 ;;
-    ibc)            cmd_ibc; exit 0 ;;
-    demo)           shift; cmd_demo "$@"; exit 0 ;;
+    deploy)         cmd_deploy ;;
+    attestors)      cmd_attestors ;;
+    relayer)        cmd_relayer ;;
+    create-clients) cmd_create_clients ;;
+    wire)           cmd_wire ;;
+    ibc)            cmd_ibc ;;
+    transfer)       cmd_demo transfer ;;
+    demo)           shift; cmd_demo "$@" ;;
+    *)              die "Unknown command: $1 (run './setup.sh' with no args, or see header for usage)" ;;
   esac
-
-  # Default: end-to-end — chains then IBC.
-  cmd_chains
-  run_phase "Phase 4: IBC setup" setup_ibc
 }
 
 main "$@"

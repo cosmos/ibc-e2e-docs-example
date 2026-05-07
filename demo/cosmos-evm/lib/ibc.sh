@@ -635,8 +635,8 @@ wait_for_evm_client() {
 }
 
 # ─── Phase 4F2 ───────────────────────────────────────────────────────────────
-# Submit Cosmos-side `tx ibc client add-counterparty` so the wasm client knows
-# its EVM peer.
+# Submit Cosmos-side `tx ibc client add-counterparty` so the attestation
+# client knows its EVM peer.
 register_counterparty() {
   log "Registering IBC counterparty on Cosmos..."
   [[ -n "$COSMOS_CLIENT_ID" ]] || die "COSMOS_CLIENT_ID not set"

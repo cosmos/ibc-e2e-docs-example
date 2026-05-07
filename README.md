@@ -26,6 +26,7 @@ cd demo/cosmos-evm
 ./setup.sh relayer          # start relayer + proof-api
 ./setup.sh create-clients   # create light clients on both chains
 ./setup.sh wire             # register counterparties + IFT bridges
+./setup.sh transfer         # cosmos↔evm IFT transfers (both directions)
 
 ./setup.sh demo cosmos-evm  # Cosmos → EVM IFT transfer
 ./setup.sh demo evm-cosmos  # EVM → Cosmos IFT transfer

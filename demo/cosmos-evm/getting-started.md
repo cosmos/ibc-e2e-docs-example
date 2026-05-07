@@ -269,6 +269,7 @@ Each step is idempotent — safe to re-run if something fails.
 ### Demos
 
 ```bash
+./setup.sh transfer          # cosmos↔evm IFT transfers (alias for `demo transfer`)
 ./setup.sh demo cosmos-evm   # Cosmos → EVM IFT transfer
 ./setup.sh demo evm-cosmos   # EVM → Cosmos IFT transfer
 ./setup.sh demo all          # the full set
