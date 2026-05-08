@@ -1,0 +1,31 @@
+# Besu execution-layer configuration for IBC devnet
+genesis-file           = "/evm/el-genesis.json"
+data-path              = "/data"
+
+# QBFT signing key — derives address 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,
+# which matches the sole validator encoded in the genesis extraData.
+node-private-key-file  = "/evm/key"
+
+# Networking — single-node devnet, but p2p must be enabled or QBFT's pivot
+# selector blocks waiting for peers. Discovery off + no bootnodes keeps it solo.
+p2p-enabled          = true
+discovery-enabled    = false
+bootnodes            = []
+host-allowlist       = ["*"]
+
+# JSON-RPC HTTP (port 8545)
+rpc-http-enabled     = true
+rpc-http-host        = "0.0.0.0"
+rpc-http-port        = 8545
+rpc-http-cors-origins = ["*"]
+rpc-http-api         = ["ETH","NET","WEB3","TXPOOL","DEBUG","ADMIN","QBFT"]
+
+# JSON-RPC WebSocket (port 8546)
+rpc-ws-enabled       = true
+rpc-ws-host          = "0.0.0.0"
+rpc-ws-port          = 8546
+rpc-ws-api           = ["ETH","NET","WEB3","TXPOOL"]
+
+# Sync — single-node devnet, no peers to sync from, so don't block on them.
+sync-mode            = "FULL"
+sync-min-peers       = 0

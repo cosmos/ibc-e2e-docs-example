@@ -1,0 +1,41 @@
+{
+  "server": {"log_level": "info", "address": "0.0.0.0", "port": 9090},
+  "modules": [
+    {
+      "name": "cosmos_to_eth",
+      "src_chain": "${COSMOS_CHAIN_ID}",
+      "dst_chain": "${ETH_CHAIN_ID}",
+      "config": {
+        "tm_rpc_url": "http://cosmos:26657",
+        "ics26_address": "${ICS26_ROUTER_ADDR}",
+        "eth_rpc_url": "http://besu:8545",
+        "signer_address": "${RELAYER_ADDR}",
+        "mode": {"attested": {
+          "attestor": {
+            "quorum_threshold": 1,
+            "attestor_endpoints": ["http://attestor-cosmos:9101"],
+            "attestor_query_timeout_ms": 10000
+          }
+        }}
+      }
+    },
+    {
+      "name": "eth_to_cosmos",
+      "src_chain": "${ETH_CHAIN_ID}",
+      "dst_chain": "${COSMOS_CHAIN_ID}",
+      "config": {
+        "tm_rpc_url": "http://cosmos:26657",
+        "ics26_address": "${ICS26_ROUTER_ADDR}",
+        "eth_rpc_url": "http://besu:8545",
+        "signer_address": "${RELAYER_ADDR}",
+        "mode": {"attested": {
+          "attestor": {
+            "quorum_threshold": 1,
+            "attestor_endpoints": ["http://attestor:9101"],
+            "attestor_query_timeout_ms": 10000
+          }
+        }}
+      }
+    }
+  ]
+}

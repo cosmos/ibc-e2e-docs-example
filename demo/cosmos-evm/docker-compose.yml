@@ -1,0 +1,181 @@
+# IBC Demo: Cosmos (sandbox) ↔ Ethereum (Besu EL)
+#
+# Chain A — Cosmos:   single CometBFT validator, standard Cosmos SDK IBC
+# Chain B — Ethereum: single PoS validator (Gasper, post-merge from block 0)
+#   • Besu  = execution layer (EVM, JSON-RPC, Engine API)
+
+services:
+
+  # ── Chain A: Cosmos (sandbox, 1 CometBFT validator) ──────────────────────
+  cosmos:
+    image: ${COSMOS_IMAGE:-ghcr.io/cosmos/sandbox-ledger:latest}
+    user: root
+    container_name: cosmos
+    command: [ "start", "--home=/data" ]
+    ports:
+      - "26657:26657" # CometBFT RPC
+      - "9090:9090" # gRPC
+      - "1317:1317" # REST API
+      - "26656:26656" # P2P
+    volumes:
+      - cosmos-data:/data
+      - ./cosmos:/cosmos-config:ro
+      - ./cosmos/local/config:/data/config
+      # Bind-mount the keyring on the host so the relayer can mount the same
+      # path read-only — avoids a docker-volume → docker-volume copy step.
+      - ./cosmos/local/keyring-test:/data/keyring-test
+    networks:
+      - ibc-net
+    restart: on-failure
+    healthcheck:
+      test: [ "CMD", "sandboxd", "status", "--home=/data" ]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+
+  # ── Chain B / EL: Besu (execution layer) ─────────────────────────────────
+  besu:
+    image: ${BESU_IMAGE:-hyperledger/besu:26.2.0}
+    container_name: besu
+    command: [ "--config-file=/evm/besu.toml", "--metrics-enabled", "--metrics-host=0.0.0.0", "--metrics-port=9545", "--Xqbft-enable-early-round-change" ]
+    ports:
+      - "8545:8545" # EVM JSON-RPC
+      - "8546:8546" # EVM WebSocket
+      - "9545:9545"
+    volumes:
+      - besu-data:/data
+      - ./evm:/evm:ro
+    networks:
+      - ibc-net
+    restart: on-failure
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - "exec 3<>/dev/tcp/localhost/8545"
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+
+  # ── Relayer database ─────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: ibc-postgres
+    environment:
+      POSTGRES_USER: relayer
+      POSTGRES_PASSWORD: relayer
+      POSTGRES_DB: relayer
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ibc-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U relayer" ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # ── IBC Operator / Relayer ────────────────────────────────────────────────
+  relayer:
+    image: ${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}
+    container_name: ibc-relayer
+    command: [ "start" ]
+    environment:
+      POSTGRES_USER: relayer
+      POSTGRES_PASSWORD: relayer
+    ports:
+      - "9100:9100"
+    volumes:
+      - ./ibc:/home/nonroot/config:ro
+      - relayer-data:/relayer
+      # Same keyring directory the cosmos container writes to, mounted
+      # read-only so the relayer can sign txs without copying the keys.
+      - ./cosmos/local/keyring-test:/relayer/cosmos-keys/keyring-test:ro
+    networks:
+      - ibc-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+      proof-api:
+        condition: service_started
+    restart: on-failure
+
+  # ── IBC Attestor (EVM watcher) ────────────────────────────────────────────
+  # Watches Besu (EVM) for IBC events. Attestations advance the EVM light
+  # client (attestations LC) on Cosmos. One process per chain — the binary takes a
+  # singular --chain-type at startup, so a second service watches Cosmos.
+  attestor:
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    container_name: ibc-attestor
+    command: [ "server", "--config", "/config/attestor-config.toml", "--chain-type", "evm", "--signer-type", "local" ]
+    volumes:
+      - ./ibc/local:/config:ro
+      - attestor-data:/data
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── IBC Attestor (Cosmos watcher) ─────────────────────────────────────────
+  # Watches Cosmos (CometBFT) for IBC events. Attestations advance the
+  # AttestationLightClient on EVM (replaces SP1ICS07Tendermint). Shares the
+  # keystore with the EVM-watching attestor, so a single attestor address
+  # is registered with both light clients.
+  attestor-cosmos:
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    container_name: ibc-attestor-cosmos
+    command: [ "server", "--config", "/config/attestor-cosmos-config.toml", "--chain-type", "cosmos", "--signer-type", "local" ]
+    volumes:
+      - ./ibc/local:/config:ro
+      - attestor-cosmos-data:/data
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+    restart: on-failure
+
+  # ── Proof API (attestation aggregator) ────────────────────────────────────
+  # Wraps the attestor services behind a gRPC interface the relayer can call
+  # to fetch attestations for both directions. Configured in fully attested
+  # mode
+  proof-api:
+    image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}
+    container_name: ibc-proof-api
+    volumes:
+      - ./ibc/local/relayer.json:/usr/local/relayer/relayer.json:ro
+    networks:
+      - ibc-net
+    depends_on:
+      cosmos:
+        condition: service_healthy
+      besu:
+        condition: service_healthy
+      attestor:
+        condition: service_started
+      attestor-cosmos:
+        condition: service_started
+    restart: on-failure
+
+volumes:
+  cosmos-data:
+  besu-data:
+  relayer-data:
+  attestor-data:
+  attestor-cosmos-data:
+  postgres-data:
+
+networks:
+  ibc-net:
+    driver: bridge

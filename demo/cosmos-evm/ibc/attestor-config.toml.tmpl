@@ -1,0 +1,14 @@
+# ibc-attestor config — rendered from templates/attestor-config.toml.tmpl
+# Variables: ICS26_ROUTER_ADDR
+
+[server]
+listen_addr = "0.0.0.0:9101"
+health_addr = "0.0.0.0:9102"
+
+[adapter]
+url = "http://besu:8545"
+router_address = "${ICS26_ROUTER_ADDR}"
+finality_offset = 0
+
+[signer]
+keystore_path = "/config/.ibc-attestor/ibc-attestor-keystore"

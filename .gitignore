@@ -1,0 +1,9 @@
+logs
+ibc-relayer*
+solidity-ibc*
+*.wasm
+*.ssz
+*keystore*
+*.hex
+*.env
+local
