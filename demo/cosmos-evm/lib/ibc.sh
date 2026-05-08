@@ -756,7 +756,7 @@ mint_ift_tokens() {
   validator_addr=$(run_in cosmos keys show validator -a \
     --keyring-backend test --home "$COSMOS_HOME" 2>/dev/null | tr -d '[:space:]')
 
-  log "  Minting ${mint_amount}${COSMOS_IFT_DENOM} to ${validator_addr}..."
+  log "  Minting ${mint_amount} ${COSMOS_IFT_DENOM} to ${validator_addr}..."
   cosmos_tx_and_wait tx tokenfactory mint \
     "$validator_addr" "${mint_amount}${COSMOS_IFT_DENOM}" \
     --from validator >/dev/null

@@ -372,7 +372,7 @@ demo_track_packet_status() {
 }
 
 demo_failure_and_retry() {
-  log "╔══ Demo: Failed transfer surfaces via relayer status API ════════════════╗"
+  log "╔══ Demo: Timed-out transfer — packet refunded via MsgTimeout ═══════════╗"
   log "  Pausing relayer so the packet cannot be relayed before it times out..."
   docker compose pause relayer 2>/dev/null || true
 
@@ -410,13 +410,32 @@ demo_failure_and_retry() {
 
   grpc_call -d "{\"tx_hash\":\"${tx_hash}\",\"chain_id\":\"${COSMOS_CHAIN_ID}\"}" \
     relayer:3000 skip.relayer.RelayerApiService/Relay 2>/dev/null || true
-  sleep 20
 
-  log "  Querying status for timed-out packet:"
-  grpc_call -d "{\"tx_hash\":\"${tx_hash}\",\"chain_id\":\"${COSMOS_CHAIN_ID}\"}" \
-    relayer:3000 skip.relayer.RelayerApiService/Status 2>/dev/null | jq '.' || \
-    warn "  grpcurl not yet available — check: docker compose logs relayer"
+  log "  Waiting for timeout to settle (up to 120s)..."
+  local max=120 step=5 elapsed=0
+  while (( elapsed < max )); do
+    local status_json state
+    status_json=$(grpc_call -d "{\"tx_hash\":\"${tx_hash}\",\"chain_id\":\"${COSMOS_CHAIN_ID}\"}" \
+      relayer:3000 skip.relayer.RelayerApiService/Status 2>/dev/null) || status_json=""
+    state=$(echo "$status_json" | jq -r '.packetStatuses[0].state // empty' 2>/dev/null || echo "")
+    if [[ "$state" == "TRANSFER_STATE_COMPLETE" || "$state" == "TRANSFER_STATE_FAILED" ]]; then
+      local timeout_tx
+      timeout_tx=$(echo "$status_json" | jq -r '.packetStatuses[0].timeoutTx.txHash // empty' 2>/dev/null || echo "")
+      if [[ -n "$timeout_tx" ]]; then
+        log "  ✓ Timeout path confirmed — tokens refunded via MsgTimeout tx: $timeout_tx"
+      else
+        warn "  Transfer completed without a timeout tx — packet may have been relayed successfully instead"
+      fi
+      echo "$status_json" | jq '.'
+      log "╚═════════════════════════════════════════════════════════════════════════╝"
+      return 0
+    fi
+    (( elapsed += step ))
+    sleep "$step"; echo -n "."
+  done
 
+  warn "  Packet did not reach a terminal state after ${max}s — last state: ${state:-unknown}"
+  warn "  Check: docker compose logs relayer"
   log "╚═════════════════════════════════════════════════════════════════════════╝"
 }
 
@@ -436,11 +455,11 @@ demo_observability() {
   metrics=$(curl_in_net -sf http://relayer:9100/metrics 2>/dev/null) || metrics=""
   if [[ -n "$metrics" ]]; then
     local ibc_lines
-    ibc_lines=$(echo "$metrics" | grep -E "^(ibc_relay|ibc_gas|ibc_transfer|go_goroutines)" | head -20)
+    ibc_lines=$(echo "$metrics" | grep -E "^relayerapi_" | grep -vE '_bucket\{|_(count|sum)\{|_(count|sum) ' | head -20)
     if [[ -n "$ibc_lines" ]]; then
       echo "$ibc_lines"
     else
-      echo "$metrics" | grep -v "^#" | head -10
+      echo "$metrics" | grep -v "^#" | grep -v "^$" | head -10
     fi
   else
     warn "  Prometheus metrics not reachable at relayer:9100"
@@ -464,12 +483,12 @@ demo_observability() {
   fi
 
   log ""
-  log "  Recent relayer logs (structured JSON — look for 'trace_id' fields):"
+  log "  Recent relayer logs (structured JSON — key fields: msg, source_chain_id, tx_hash, state):"
   docker compose logs --no-log-prefix --tail 5 relayer 2>/dev/null | head -20
 
   if docker compose ps attestor 2>/dev/null | grep -q "Up"; then
     log ""
-    log "  Recent attestor logs (OpenTelemetry spans with trace IDs):"
+    log "  Recent attestor logs (OpenTelemetry spans — key fields: name, height, durationMs, status):"
     docker compose logs --no-log-prefix --tail 5 attestor 2>/dev/null | head -20
   fi
 
