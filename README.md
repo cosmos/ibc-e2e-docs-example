@@ -7,7 +7,6 @@ End-to-end demos for IBC v2 token transfers between Cosmos chains and EVM networ
 | Demo | Directory | What it shows |
 |------|-----------|---------------|
 | Cosmos ↔ single Besu | `demo/cosmos-evm/` | Cosmos chain ↔ single-validator QBFT EVM; attestation LCs |
-| Three Besu chains | `demo/besu-trio/` | Hub-and-spoke: A ↔ hub ↔ B; QBFT light clients |
 
 Each demo is self-contained with its own `docker-compose.yml`, `setup.sh`, and `lib/`.
 
