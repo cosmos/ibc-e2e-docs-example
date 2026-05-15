@@ -205,7 +205,6 @@ clean() {
     "$COSMOS_CFG_DIR/local" \
     "$IBC_DIR/local" \
     "$IBC_DIR/state.env" \
-    "$IBC_DIR/forge" \
     "$IBC_DIR"/ibc-relayer-*
 
   log "Clean done"
