@@ -78,29 +78,29 @@ graph LR
 ### 3. EVM-side contracts
 
 On Besu, `ICS26Router` is the IBC hub; it routes `"gmpport"` to `ICS27GMP`
-and verifies Cosmos inbound state via `AttestationLightClient`. `TestIFT` is the
-ERC20 that mints/burns; `CosmosIFTSendCallConstructor` builds the `cosmostx`
-payload for EVM→Cosmos.
+and verifies Cosmos inbound state via `AttestationLightClient`. `IFTOwnable`
+is the ERC20 that mints/burns; `CosmosIFTSendCallConstructor` builds the
+`cosmostx` payload for EVM→Cosmos.
 
 ```mermaid
 graph LR
-    User(["user"]) -->|cast send iftTransfer| TestIFT
+    User(["user"]) -->|cast send iftTransfer| IFT
     Relayer(("relayer")) -->|recvPacket + attestation| ICS26
 
     subgraph EVM["Solidity contracts on Besu"]
         ICS26["ICS26Router<br/>ERC1967 proxy"]
         AttLC["AttestationLightClient<br/>client-N, verifies Cosmos state<br/>(m-of-n attestor signatures)"]
         ICS27["ICS27GMP<br/>port 'gmpport'<br/>+ ICS27Account (CREATE2)"]
-        TestIFT["TestIFT (ERC20 proxy)<br/>iftTransfer / iftMint"]
+        IFT["IFTOwnable (ERC20 proxy)<br/>iftTransfer / iftMint"]
         Ctor["CosmosIFTSendCallConstructor<br/>encodes cosmostx MsgIFTMint<br/>(baked with ICA + denom)"]
     end
 
     ICS26 -->|verifyMembership| AttLC
     ICS26 -->|addIBCApp 'gmpport'| ICS27
-    ICS27 -->|functionCall via ICS27Account| TestIFT
-    TestIFT -->|sendCall via| ICS27
-    TestIFT -.->|uses for payload| Ctor
-    TestIFT --> ERC20[("balances mapping")]
+    ICS27 -->|functionCall via ICS27Account| IFT
+    IFT -->|sendCall via| ICS27
+    IFT -.->|uses for payload| Ctor
+    IFT --> ERC20[("balances mapping")]
 ```
 
 ---
@@ -159,8 +159,8 @@ Relayer submits MsgRecvPacket
        ├─ AttestationLightClient.verifyMembership   (m-of-n signature check)
        └─ routes to "gmpport" → ICS27GMP.onRecvPacket
              ├─ _getOrCreateAccount(clientId, sender)  (CREATE2 proxy)
-             └─ account.functionCall(TestIFT, payload)
-                    └─ TestIFT.iftMint(receiver, amount)
+             └─ account.functionCall(IFTOwnable, payload)
+                    └─ IFTOwnable.iftMint(receiver, amount)
                          ├─ checks bridge registered for clientId     ← registerIFTBridge
                          ├─ checks bridge.counterpartyIFTAddress == sender  ← IFT module addr
                          └─ _mint(receiver, amount) into ERC20 supply
@@ -170,10 +170,10 @@ Relayer submits MsgRecvPacket
 
 ```
 User (or demo)
- │  cast send TestIFT "iftTransfer(string,string,uint256,uint64)" \
+ │  cast send IFTOwnable "iftTransfer(string,string,uint256,uint64)" \
  │         client-0 <wf1…receiver> <amount> <timeout>
  ▼
-TestIFT.iftTransfer
+IFTOwnable.iftTransfer
  ├─ burns <amount> from msg.sender
  └─ builds cosmostx payload via CosmosIFTSendCallConstructor
        └─ encodes MsgIFTMint{coin, receiver, signer: ICA}
@@ -199,12 +199,12 @@ Relayer submits MsgRecvPacket
 Two addresses worth calling out explicitly in the EVM→Cosmos direction (easy to
 confuse — failing to separate them silently breaks minting):
 
-- **ICA** (from `sandboxd query gmp get-address <client> <TestIFT> ""`): the
+- **ICA** (from `sandboxd query gmp get-address <client> <IFTOwnable> ""`): the
   signer of `MsgIFTMint` on Cosmos. Baked into `CosmosIFTSendCallConstructor`.
 - **Cosmos IFT module account** (from `sandboxd query auth module-account ift`):
   the `.sender` in GMP packets FROM Cosmos. Stored as `counterpartyIFTAddress`
-  in `TestIFT.registerIFTBridge` so `iftMint`'s auth check passes on the return
-  leg.
+  in `IFTOwnable.registerIFTBridge` so `iftMint`'s auth check passes on the
+  return leg.
 
 ---
 
@@ -246,12 +246,12 @@ post-template additions:
 |-----|--------|---------|
 | `COSMOS_CLIENT_ID` | `create_ibc_clients` / `wait_for_ibc_ready` | `attestations-N` on Cosmos |
 | `EVM_CLIENT_ID` | `create_evm_ibc_client` / `wait_for_evm_client` | `client-N` on EVM |
-| `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | TestIFT proxy on EVM. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — aligned with the Cosmos `uift` denom so balances on both sides show matching names |
+| `IFT_CONTRACT_ADDR` | `deploy_ift_contracts` | `IFTOwnable` proxy on EVM. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — aligned with the Cosmos `uift` denom so balances on both sides show matching names |
 | `COSMOS_IFT_DENOM` | `register_ift_bridges` | `uift` (bare subdenom — sandbox's tokenfactory doesn't use `factory/…/…` in lookups). Same logical token as EVM `UIFT` — the bridge maps them 1:1 |
 | `DEMO_TRANSFER_AMOUNT` | `register_ift_bridges` | rewritten to `<N>uift` so demos exercise IFT by default |
 | `IFT_ICA_ADDRESS` | `register_evm_ift_bridge` | ICA bech32 — MsgIFTMint signer on Cosmos side, baked into CosmosIFTSendCallConstructor |
 | `IFT_CTOR_ADDR` | `register_evm_ift_bridge` | Deployed `CosmosIFTSendCallConstructor` address |
-| `COSMOS_IFT_MODULE_ADDR` | `register_evm_ift_bridge` | Cosmos IFT module account — stored as `counterpartyIFTAddress` in `TestIFT.registerIFTBridge` |
+| `COSMOS_IFT_MODULE_ADDR` | `register_evm_ift_bridge` | Cosmos IFT module account — stored as `counterpartyIFTAddress` in `IFTOwnable.registerIFTBridge` |
 
 ---
 
@@ -269,12 +269,13 @@ demo/cosmos-evm/
                               + raw_log on fail), state_set (in-place key replace in state.env)
     chains.sh               — init_cosmos, init_ethereum, wait_for_services, print_status,
                               clean, _ensure_host_owns_cosmos_local (Linux bind-mount fix)
-    ibc.sh                  — Phase 4: contract deploy (forge script — DEPLOY_SCRIPT-overridable),
+    ibc.sh                  — Phase 4: prepare_forge_workspace + fetch_release_bytecode,
+                              contract deploy (forge script — DEPLOY_SCRIPT-overridable),
                               client create, IFT bridges, register_evm_ift_bridge (ICA +
-                              CosmosIFTSendCallConstructor deploy + TestIFT.registerIFTBridge),
+                              CosmosIFTSendCallConstructor deploy + IFTOwnable.registerIFTBridge),
                               mint_ift_tokens
     demo.sh                 — user-story demonstrations (IFT transfers in both directions via
-                              tx ift transfer / TestIFT.iftTransfer); evm_erc20_balance (curl-
+                              tx ift transfer / IFTOwnable.iftTransfer); evm_erc20_balance (curl-
                               based eth_call, replaces per-iteration cast container spawns);
                               print_balance_curl_cmds (copy-pasteable curls for the user)
 
@@ -303,17 +304,22 @@ demo/cosmos-evm/
     attestor-cosmos-config.toml.tmpl — rendered to ibc/local/attestor-cosmos-config.toml  (Cosmos watcher)
     relayer-keys.json.tmpl           — rendered to ibc/local/keys.json
     client-state.json.tmpl, consensus-state.json.tmpl — attestation LC create-client inputs
-    scripts/                  — committed forge scripts (auto-copied into the fetched source
-                                tree by deploy_ibc_contracts before forge runs).
-                                Drop a custom *.s.sol here and override DEPLOY_SCRIPT to use it.
-      MinimalDeploy.s.sol     — minimal IFT stack (AccessManager + ICS26Router + ICS27GMP +
-                                TestIFT). Drop-in alternative to upstream E2ETestDeploy.s.sol;
-                                skips ICS20Transfer / SP1 verifiers / TestERC20 since this
-                                demo doesn't use them. Use via:
-                                  DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol ./setup.sh ibc
+    forge/                    — committed forge workspace (foundry.toml, package.json,
+                                remappings.txt). bun install populates node_modules with
+                                OpenZeppelin + forge-std at setup time.
+      scripts/
+        MinimalDeploy.s.sol   — minimal IFT stack deploy. Loads eureka contracts
+                                (ICS26Router, ICS27GMP, ICS27Account, IFTOwnable) from
+                                release-bytecode/*.json via vm.getCode; only OpenZeppelin
+                                (AccessManager + ERC1967Proxy) is imported as source.
+                                Override the script via DEPLOY_SCRIPT=<path>.
+      release-bytecode/         — prebuilt contract artifacts from
+                                  solidity-ibc-eureka@$SOLIDITY_RELEASE_TAG release
+                                  tarball (gitignored)
+      node_modules/, out/, cache/, broadcast/ — forge / bun runtime (gitignored)
     state.env                 — persisted addresses + IDs, built up by state_set appends (gitignored)
     local/                    — rendered configs the services actually read (gitignored)
-    solidity-ibc-eureka-<tag>/, ibc-relayer-<tag>/ — downloaded sources (gitignored)
+    ibc-relayer-<tag>/        — downloaded relayer DB migrations (gitignored)
 ```
 
 Templates use bash `${VAR}` substitution; they're rendered via `render_template`
@@ -339,9 +345,9 @@ All work happens inside Docker, so the host only needs the tools `setup.sh` shel
 
 ### Resources
 
-- **Disk:** ~5 GB free — most of it Docker images; solidity-ibc-eureka source + `bun install` node_modules adds ~500 MB under `ibc/`.
+- **Disk:** ~5 GB free — most of it Docker images. The `bun install` node_modules tree under `ibc/forge/` is ~200 MB; the prebuilt release tarball that backs `MinimalDeploy.s.sol` is ~150 KB.
 - **Memory:** 4 GB is enough for the full stack idle; demos are light.
-- **Network:** first run pulls ~14 images and two GitHub tarballs; subsequent runs are fully offline if nothing's evicted.
+- **Network:** first run pulls ~14 images and two GitHub tarballs (release-bytecode + ibc-relayer migrations); subsequent runs are fully offline if nothing's evicted.
 
 ### Host ports
 
@@ -367,7 +373,7 @@ All tags pin to `${VAR:-default}` in `setup.sh` — override any variable to use
 | `ghcr.io/cosmos/sandbox:latest` | `COSMOS_IMAGE` | Cosmos chain node + CLI |
 | `hyperledger/besu:26.2.0` | `BESU_IMAGE` | Ethereum node — single-validator QBFT (no CL) |
 | `ghcr.io/foundry-rs/foundry:latest` | `FOUNDRY_IMAGE` | `forge script` deploy + `cast` calls |
-| `oven/bun:1` | `BUN_IMAGE` | `bun install` for solidity-ibc-eureka deps |
+| `oven/bun:1` | `BUN_IMAGE` | `bun install` for OpenZeppelin + forge-std deps under `ibc/forge/` |
 | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | `OPERATOR_IMAGE` | IBC packet relayer |
 | `ghcr.io/cosmos/ibc-attestor:latest` | `ATTESTOR_IMAGE` | EVM state attestor |
 | `ghcr.io/cosmos/proof-api:latest` | `PROOF_API_IMAGE` | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
@@ -382,9 +388,9 @@ Each fetch is skipped if the corresponding skip-and-reuse variable (below) is se
 
 | Source | Default ref | Destination | Purpose |
 |--------|-------------|-------------|---------|
-| `cosmos/solidity-ibc-eureka` archive | `$SOLIDITY_IBC_TAG` (default `main` — the tagged `solidity-v2.0.1` predates `ICS27GMP.sol`, which is required for the IFT flow) | `ibc/solidity-ibc-eureka-<ref>/` | Forge deploy scripts, contract ABIs (`ICS26Router`, `ICS27GMP`, `TestIFT`, `CosmosIFTSendCallConstructor`) |
+| `cosmos/solidity-ibc-eureka` release tarball | `$SOLIDITY_RELEASE_TAG` (default `solidity-v3.0.0-rc.1`) | `ibc/forge/release-bytecode/` | Prebuilt contract bytecode JSONs — `ICS26Router`, `ICS27GMP`, `ICS27Account`, `IFTOwnable`, `AttestationLightClient`, `CosmosIFTSendCallConstructor` — loaded at deploy time via `vm.getCode`. No source-tree clone needed. |
 | `cosmos/ibc-relayer` archive | matches `OPERATOR_IMAGE` tag (`v0.0.2`) | `ibc/ibc-relayer-<tag>/` | SQL migration files for the relayer DB |
-| `bun install` | (from solidity-ibc-eureka `package.json`) | `ibc/solidity-ibc-eureka-<ref>/node_modules/` | Forge deploy script JS deps |
+| `bun install` | from `ibc/forge/package.json` (`@openzeppelin/contracts@5.6.1` + `forge-std@v1.15.0`) | `ibc/forge/node_modules/` | OpenZeppelin + forge-std for compiling `MinimalDeploy.s.sol` |
 
 ### Skip-and-reuse knobs
 
@@ -392,7 +398,8 @@ Any of these, if pre-set, skips the corresponding step — useful for an existin
 
 | Variable | Skips |
 |----------|-------|
-| `SOLIDITY_IBC_DIR` | GitHub tarball fetch — uses the provided checkout |
+| `SOLIDITY_IBC_DIR` | Forge workspace path override (default: `ibc/forge/`) — point at a custom workspace if you've forked the deploy script |
+| `SOLIDITY_RELEASE_TAG` | Pin a different solidity-ibc-eureka release for the prebuilt bytecode bundle |
 | `ICS26_ROUTER_ADDR` (AND router has bytecode on-chain) | Forge deploy — uses pre-deployed addresses. `EVM_ATTESTATION_LC_ADDR` is NOT part of this gate because it's deployed by `create_evm_ibc_client` via `cast --create`, not by `MinimalDeploy`. The on-chain bytecode probe re-deploys if Besu's volume was wiped but state.env survived. |
 | `EVM_ATTESTATION_LC_ADDR` | `AttestationLightClient` deploy — uses an existing on-chain LC. Must be already registered with `ICS26Router.addClient`. |
 | `COSMOS_CLIENT_ID` / `EVM_CLIENT_ID` | Client creation — uses existing clients (validated by `reconcile_ibc_client_pair`) |
@@ -405,11 +412,11 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 
 - **Under `evm/`:** `key` (Besu QBFT validator private key)
 - **Under `cosmos/`:** `local/config/{genesis.json,app.toml,config.toml,client.toml,node_key.json,priv_validator_key.json,…}`, `local/ibc_client_state.json`, `local/ibc_consensus_state.json` — bind-mounted directly into the cosmos container
-- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `solidity-ibc-eureka-<tag>/`, `ibc-relayer-<tag>/`
+- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `forge/{node_modules,out,cache,broadcast,release-bytecode}/`, `ibc-relayer-<tag>/`
 - **Under `logs/`:** `setup-YYYYMMDD-HHMMSS.log` (one per run)
 - **Docker volumes** (prefixed with project dir name): `cosmos-data` (chain state + keyring; config now on host), `besu-data`, `relayer-data`, `attestor-data`, `attestor-cosmos-data`, `postgres-data`
 
-`./setup.sh clean` removes all of the above except the downloaded source tarballs in `ibc/` (those stay cached for fast re-runs).
+`./setup.sh clean` removes all of the above and wipes the entire `ibc/forge/` directory. The committed skeleton lives in git, so run `git restore demo/cosmos-evm/ibc/forge/` afterwards to bring `foundry.toml`, `package.json`, `remappings.txt`, and `scripts/MinimalDeploy.s.sol` back. (Don't keep uncommitted edits inside `ibc/forge/` across a `clean`.)
 
 ---
 
@@ -454,7 +461,7 @@ All commands are idempotent — re-running a step skips already-completed work.
 ```bash
 ./setup.sh chains           # start Cosmos + Besu
 
-./setup.sh deploy           # fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh deploy           # prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
 ./setup.sh attestors        # generate keystore + configs, start attestor-evm and attestor-cosmos
 ./setup.sh relayer          # copy keys, render configs, run DB migrations, start relayer + proof-api
 ./setup.sh create-clients   # create attestation light clients on both chains
@@ -503,9 +510,10 @@ The table maps each internal phase to the `setup.sh` step command that runs it.
 | 1B | `init_ethereum` | `chains` | Start Besu (QBFT consensus runs internally — single validator keyed by `evm/key`, address baked into `el-genesis.json` extraData; no CL/Engine API) |
 | 2 | `start_services` | `chains` | `docker compose up -d cosmos` (Besu already running) |
 | 3 | `wait_for_services` | `chains` | Poll cosmos status + besu `eth_blockNumber` |
-| 4A0 | `fetch_solidity_ibc` | `deploy` | Download `cosmos/solidity-ibc-eureka` archive at `$SOLIDITY_IBC_TAG` (default `main`); persists `SOLIDITY_IBC_DIR` to `state.env` |
-| 4A | `deploy_ibc_contracts` | `deploy` | Auto-copies any committed `ibc/scripts/*.s.sol` into the fetched source tree, then runs `forge script "$DEPLOY_SCRIPT"` (default: `scripts/E2ETestDeploy.s.sol` upstream; alternative: `scripts/MinimalDeploy.s.sol` for the minimal stack). Deploys ICS26Router, **ICS27GMP**, **TestIFT**, registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if router already has bytecode. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
-| 4A1 | `deploy_ift_contracts` | `deploy` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (TestIFT proxy) |
+| 4A0 | `prepare_forge_workspace` | `deploy` | Validate the committed forge skeleton at `$SOLIDITY_IBC_DIR` (default `ibc/forge/`), create runtime subdirs, run `bun install` to fetch OpenZeppelin + forge-std into `node_modules/`. Migrates stale `SOLIDITY_IBC_DIR` values from earlier source-tree layouts. |
+| 4A0b | `fetch_release_bytecode` | `deploy` | Download the `solidity-contracts-$SOLIDITY_RELEASE_TAG.tar.gz` release tarball from `cosmos/solidity-ibc-eureka` and extract `bytecode/*.json` into `ibc/forge/release-bytecode/`. These are consumed at runtime by `MinimalDeploy.s.sol` (`vm.getCode`), and standalone by Phase 4E3 (`AttestationLightClient`) and Phase 4F3a (`CosmosIFTSendCallConstructor`). |
+| 4A | `deploy_ibc_contracts` | `deploy` | Runs `forge script "$DEPLOY_SCRIPT"` (default `scripts/MinimalDeploy.s.sol`). The script deploys `ICS26Router`, `ICS27GMP`, `ICS27Account`, and `IFTOwnable` proxies — bytecode loaded from `release-bytecode/*.json` via `vm.getCode` — and registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if the router already has bytecode on-chain. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
+| 4A1 | `deploy_ift_contracts` | `deploy` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (`IFTOwnable` proxy) |
 | 4E1 | `_ensure_attestor_keystore` | `attestors` | Generate Web3 v3 JSON keystore for the attestor signing key (idempotent) |
 | 4D1a | `generate_attestor_config` | `attestors` | Render `attestor-config.toml` (EVM watcher config) |
 | 4D1b | `generate_attestor_cosmos_config` | `attestors` | Render `attestor-cosmos-config.toml` (Cosmos watcher config) |
@@ -523,8 +531,8 @@ The table maps each internal phase to the `setup.sh` step command that runs it.
 | 4F | `wait_for_ibc_ready` | `create-clients` | Poll Cosmos REST `/ibc/core/client/v1/client_states` for any `attestations-*` client |
 | 4F1 | `wait_for_evm_client` | `create-clients` | Poll `ICS26Router.getNextClientSeq()` until > 0; derives `client-$((next_seq - 1))` |
 | 4F2 | `register_counterparty` | `wire` | Cosmos-side `add-counterparty attestations-N client-N` |
-| 4F3 | `register_ift_bridges` | `wire` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <TestIFT-checksummed> evm` (EIP-55 checksum is critical — sandbox x/ift does plain string compare against ICS27GMP's checksummed sender). Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
-| 4F3a | `register_evm_ift_bridge` | `wire` | (1) `sandboxd query gmp get-address <client> <TestIFT-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased). (2) `sandboxd query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)`. (4) `TestIFT.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
+| 4F3 | `register_ift_bridges` | `wire` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <IFTOwnable-checksummed> evm` (EIP-55 checksum is critical — sandbox x/ift does plain string compare against ICS27GMP's checksummed sender). Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
+| 4F3a | `register_evm_ift_bridge` | `wire` | (1) `sandboxd query gmp get-address <client> <IFTOwnable-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased). (2) `sandboxd query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)` (bytecode from `release-bytecode/`). (4) `IFTOwnable.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
 | 4F4 | `finalize_relayer_config` | `wire` | Re-render `config.yml` now that both client IDs are known; restart relayer |
 | 4G | `demo_all` | `demo` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands before broadcasting. Direction-aware polling: cosmos→evm caps at 120s, evm→cosmos caps at 300s. |
 
