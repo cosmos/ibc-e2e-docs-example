@@ -44,7 +44,7 @@ prepare_forge_workspace() {
     log "Installing contract dependencies (bun install) into $SOLIDITY_IBC_DIR..."
     docker run --rm \
       -v "$SOLIDITY_IBC_DIR":/contracts -w /contracts \
-      "$BUN_IMAGE" bun install
+      "$BUN_IMAGE" bun install --frozen-lockfile
   fi
 
   log "Forge workspace ready at $SOLIDITY_IBC_DIR"
