@@ -1,0 +1,9 @@
+{
+  "name": "ibc-e2e-cosmos-evm-deploy",
+  "private": true,
+  "description": "Forge workspace for MinimalDeploy.s.sol. Compiles only the deploy script; eureka contracts are loaded as prebuilt bytecode at runtime.",
+  "dependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "forge-std": "github:foundry-rs/forge-std#v1.15.0"
+  }
+}

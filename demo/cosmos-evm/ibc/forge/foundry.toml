@@ -1,0 +1,28 @@
+# Forge project skeleton for scripts/MinimalDeploy.s.sol.
+#
+# This workspace exists solely to compile and run the deploy script. The
+# solidity-ibc-eureka contracts themselves are NOT compiled here — they are
+# loaded at deploy time as prebuilt bytecode from release-bytecode/*.json
+# via `vm.getCode` (see scripts/MinimalDeploy.s.sol and
+# lib/ibc.sh::fetch_release_bytecode).
+#
+# The only Solidity source pulled in at compile time is OpenZeppelin
+# (AccessManager, ERC1967Proxy, Strings) and forge-std (Script, stdJson),
+# resolved via remappings.txt and installed by `bun install`.
+
+[profile.default]
+  auto_detect_solc = false
+  evm_version = "cancun"
+  optimizer = true
+  optimizer_runs = 10_000
+  out = "out"
+  script = "scripts"
+  solc = "0.8.28"
+  # No first-party Solidity sources — `contracts/` is a placeholder so
+  # forge has a valid `src` to scan; eureka contracts come from
+  # release-bytecode/*.json at runtime via vm.getCode.
+  src = "contracts"
+  via_ir = true
+  # vm.getCode reads release-bytecode/*.json. Foundry gates filesystem
+  # access via this allowlist; "./" covers the project root.
+  fs_permissions = [{ access = "read-write", path = "./" }]

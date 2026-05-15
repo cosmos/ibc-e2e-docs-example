@@ -1,36 +1,91 @@
 #!/usr/bin/env bash
-# Phase 4: IBC setup (source fetch, forge deploy, client create, relayer wiring).
+# Phase 4: IBC setup (forge workspace + release bytecode, deploy, client create,
+# relayer wiring).
+#
+# The forge workspace at $SOLIDITY_IBC_DIR (default: ibc/forge/) is committed
+# to this repo — see ibc/forge/foundry.toml. It compiles only MinimalDeploy.s.sol
+# against OpenZeppelin + forge-std (installed via `bun install`); the eureka
+# contracts themselves come from the prebuilt release bundle and are loaded
+# inside the script via `vm.getCode`.
 
 # ─── Phase 4A0 ───────────────────────────────────────────────────────────────
-# Download the cosmos/solidity-ibc-eureka archive at $SOLIDITY_IBC_TAG into
-# $IBC_DIR. Skips if SOLIDITY_IBC_DIR is pre-set or already extracted.
-fetch_solidity_ibc() {
+# Ensure the committed forge workspace is usable: workspace dir exists,
+# foundry.toml is present, and node_modules is populated.
+prepare_forge_workspace() {
   if [[ -n "$ICS26_ROUTER_ADDR" && -n "$EVM_ATTESTATION_LC_ADDR" ]]; then
-    log "IBC contracts already provided — skipping source fetch"
-    return 0
-  fi
-  if [[ -n "$SOLIDITY_IBC_DIR" ]]; then
-    [[ -d "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR='$SOLIDITY_IBC_DIR' not found"
-    log "Using existing SOLIDITY_IBC_DIR: $SOLIDITY_IBC_DIR"
+    log "IBC contracts already provided — skipping forge workspace setup"
     return 0
   fi
 
-  SOLIDITY_IBC_DIR="$IBC_DIR/solidity-ibc-eureka-${SOLIDITY_IBC_TAG}"
-  if [[ -d "$SOLIDITY_IBC_DIR" ]]; then
-    log "solidity-ibc-eureka ${SOLIDITY_IBC_TAG} already fetched — reusing"
+  [[ -n "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR unset"
+
+  # Migration: older state.env files persisted SOLIDITY_IBC_DIR pointing at
+  # an extracted source tree (ibc/solidity-ibc-eureka-*). After the switch
+  # to the committed forge workspace, redirect such stale paths to
+  # $IBC_DIR/forge and clear the state.env entry so future runs use the
+  # default cleanly.
+  if [[ ! -f "$SOLIDITY_IBC_DIR/foundry.toml" && -f "$IBC_DIR/forge/foundry.toml" ]]; then
+    log "Stale SOLIDITY_IBC_DIR='$SOLIDITY_IBC_DIR' — redirecting to $IBC_DIR/forge"
+    SOLIDITY_IBC_DIR="$IBC_DIR/forge"
+    if [[ -f "$IBC_STATE_FILE" ]]; then
+      grep -v "^SOLIDITY_IBC_DIR=" "$IBC_STATE_FILE" > "${IBC_STATE_FILE}.tmp" 2>/dev/null || true
+      mv "${IBC_STATE_FILE}.tmp" "$IBC_STATE_FILE"
+    fi
+  fi
+
+  [[ -d "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR='$SOLIDITY_IBC_DIR' not found (committed skeleton missing?)"
+  [[ -f "$SOLIDITY_IBC_DIR/foundry.toml" ]] || die "foundry.toml missing in $SOLIDITY_IBC_DIR"
+  [[ -f "$SOLIDITY_IBC_DIR/package.json" ]] || die "package.json missing in $SOLIDITY_IBC_DIR"
+
+  mkdir -p "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules}
+  chmod 0777 "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules} 2>/dev/null || true
+
+  if [[ -z "$(ls -A "$SOLIDITY_IBC_DIR/node_modules" 2>/dev/null)" ]]; then
+    log "Installing contract dependencies (bun install) into $SOLIDITY_IBC_DIR..."
+    docker run --rm \
+      -v "$SOLIDITY_IBC_DIR":/contracts -w /contracts \
+      "$BUN_IMAGE" bun install --frozen-lockfile
+  fi
+
+  log "Forge workspace ready at $SOLIDITY_IBC_DIR"
+}
+
+# ─── Phase 4A0b ──────────────────────────────────────────────────────────────
+# Download the prebuilt contract bytecode bundle for
+# scripts/MinimalDeploy.s.sol. The script does NOT import the eureka source —
+# it loads ICS26Router / ICS27GMP / ICS27Account / IFTOwnable artifacts at
+# deploy time via `vm.getCode("release-bytecode/<Name>.json")`. Files land at
+# $SOLIDITY_IBC_DIR/release-bytecode/, which maps to /contracts/release-bytecode
+# inside the forge container.
+fetch_release_bytecode() {
+  if [[ -n "$ICS26_ROUTER_ADDR" && -n "$EVM_ATTESTATION_LC_ADDR" ]]; then
+    log "IBC contracts already provided — skipping release bytecode fetch"
+    return 0
+  fi
+  [[ -n "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR unset"
+
+  local dest="$SOLIDITY_IBC_DIR/release-bytecode"
+  if [[ -f "$dest/ICS26Router.json" \
+     && -f "$dest/ICS27GMP.json"    \
+     && -f "$dest/ICS27Account.json" \
+     && -f "$dest/IFTOwnable.json" ]]; then
+    log "Release bytecode ${SOLIDITY_RELEASE_TAG} already present — reusing"
     return 0
   fi
 
-  local url="https://github.com/cosmos/solidity-ibc-eureka/archive/${SOLIDITY_IBC_TAG}.tar.gz"
-  local tarball="$IBC_DIR/${SOLIDITY_IBC_TAG}.tar.gz"
+  local archive="solidity-contracts-${SOLIDITY_RELEASE_TAG}.tar.gz"
+  local url="https://github.com/cosmos/solidity-ibc-eureka/releases/download/${SOLIDITY_RELEASE_TAG}/${archive}"
+  local tarball="$IBC_DIR/$archive"
   log "Fetching $url..."
-  mkdir -p "$IBC_DIR"
   curl -fsSL "$url" -o "$tarball" || die "Failed to download $url"
-  tar -xzf "$tarball" -C "$IBC_DIR"
+  # Tarball layout: solidity-contracts/{TAG_NAME,bytecode/*.json,LICENSE.md}.
+  # Extract the bytecode/ subtree directly into release-bytecode/.
+  mkdir -p "$dest"
+  tar -xzf "$tarball" -C "$dest" --strip-components=2 solidity-contracts/bytecode \
+    || die "Extraction failed for $tarball"
   rm -f "$tarball"
-  [[ -d "$SOLIDITY_IBC_DIR" ]] || die "Extraction failed: $SOLIDITY_IBC_DIR not found"
-  log "solidity-ibc-eureka source ready at $SOLIDITY_IBC_DIR"
-  state_set SOLIDITY_IBC_DIR "$SOLIDITY_IBC_DIR"
+  [[ -f "$dest/ICS26Router.json" ]] || die "ICS26Router.json missing from $dest"
+  log "Release bytecode ${SOLIDITY_RELEASE_TAG} ready at $dest"
 }
 
 # Helper used by deploy_ibc_contracts + deploy_ift_contracts: look up a
@@ -54,7 +109,7 @@ _forge_return_addr() {
 
 # ─── Phase 4A ────────────────────────────────────────────────────────────────
 # Run `forge script MinimalDeploy` on Besu to deploy ICS26Router + ICS27GMP +
-# TestIFT. Idempotent: skips if router has bytecode at the recorded address.
+# IFTOwnable. Idempotent: skips if router has bytecode at the recorded address.
 deploy_ibc_contracts() {
   if [[ -n "$ICS26_ROUTER_ADDR" ]]; then
     local router_code
@@ -73,24 +128,6 @@ deploy_ibc_contracts() {
   [[ -d "$SOLIDITY_IBC_DIR" ]] || die "SOLIDITY_IBC_DIR='$SOLIDITY_IBC_DIR' not found"
 
   log "Deploying solidity-ibc-eureka contracts on Besu (chain-id $ETH_CHAIN_ID)..."
-
-  mkdir -p "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules}
-  chmod 0777 "$SOLIDITY_IBC_DIR"/{out,cache,broadcast,node_modules} 2>/dev/null || true
-
-  # Stage any committed forge scripts from ibc/scripts/ into the fetched
-  # source tree's scripts/ dir. Lets users add custom DEPLOY_SCRIPT options
-  # (e.g. scripts/MinimalDeploy.s.sol) without editing the gitignored
-  # solidity-ibc-eureka checkout. Idempotent — runs every deploy.
-  if compgen -G "$IBC_DIR/scripts/*.s.sol" > /dev/null; then
-    cp -f "$IBC_DIR/scripts"/*.s.sol "$SOLIDITY_IBC_DIR/scripts/"
-  fi
-
-  if [[ -z "$(ls -A "$SOLIDITY_IBC_DIR/node_modules" 2>/dev/null)" ]]; then
-    log "Installing contract dependencies (bun install)..."
-    docker run --rm \
-      -v "$SOLIDITY_IBC_DIR":/contracts -w /contracts \
-      "$BUN_IMAGE" bun install --frozen-lockfile
-  fi
 
   docker run --rm --entrypoint "" \
     --network "${COMPOSE_PROJECT}_ibc-net" \
@@ -119,7 +156,7 @@ deploy_ibc_contracts() {
 
 # ─── Phase 4A1 ───────────────────────────────────────────────────────────────
 # Resolve IFT_CONTRACT_ADDR from the same forge return JSON. Falls back to
-# the legacy "erc20" label for tags that predate the dedicated TestIFT proxy.
+# the legacy "erc20" label for tags that predate the dedicated IFTOwnable proxy.
 deploy_ift_contracts() {
   if [[ -n "$IFT_CONTRACT_ADDR" ]]; then
     log "IFT contract already provided: $IFT_CONTRACT_ADDR"
@@ -131,7 +168,7 @@ deploy_ift_contracts() {
   if [[ -z "$IFT_CONTRACT_ADDR" ]]; then
     IFT_CONTRACT_ADDR=$(_forge_return_addr "$(basename "$DEPLOY_SCRIPT")" erc20)
     [[ -n "$IFT_CONTRACT_ADDR" ]] \
-      && log "  (using legacy 'erc20' label — this tag lacks TestIFT)"
+      && log "  (using legacy 'erc20' label — this tag lacks IFTOwnable)"
   fi
   [[ -n "$IFT_CONTRACT_ADDR" ]] || \
     die "Neither 'ift' nor 'erc20' label in MinimalDeploy returns"
@@ -525,8 +562,11 @@ create_evm_ibc_client() {
   [[ "$next_seq" =~ ^[0-9]+$ ]] || next_seq=0
   local predicted="client-${next_seq}"
   log "  Next client seq: $next_seq → predicted: $predicted"
-  local lc_artifact="$SOLIDITY_IBC_DIR/out/AttestationLightClient.sol/AttestationLightClient.json"
-  [[ -f "$lc_artifact" ]] || die "AttestationLightClient artifact missing: $lc_artifact"
+  # AttestationLightClient is shipped as prebuilt bytecode in the release
+  # tarball (fetch_release_bytecode unpacks it). Same foundry artifact shape
+  # as forge's out/ — read `.bytecode.object` directly.
+  local lc_artifact="$SOLIDITY_IBC_DIR/release-bytecode/AttestationLightClient.json"
+  [[ -f "$lc_artifact" ]] || die "AttestationLightClient artifact missing: $lc_artifact (run fetch_release_bytecode)"
   local bytecode
   bytecode=$(jq -r '.bytecode.object' "$lc_artifact")
   [[ -n "$bytecode" && "$bytecode" != "null" ]] || die "Empty bytecode in $lc_artifact"
@@ -728,7 +768,7 @@ register_ift_bridges() {
   fi
 
   # EVM-side registration is done in a separate phase (register_evm_ift_bridge)
-  # because it needs the ICA address derived from ICS26Router + TestIFT proxy,
+  # because it needs the ICA address derived from ICS26Router + IFTOwnable proxy,
   # and then deploys the CosmosIFTSendCallConstructor parameterised with it.
 
   state_set COSMOS_IFT_DENOM "$COSMOS_IFT_DENOM"
@@ -766,12 +806,12 @@ mint_ift_tokens() {
 # ─── Phase 4F3a ──────────────────────────────────────────────────────────────
 # EVM side of the IFT bridge. Three steps, all shell-only:
 #   1. Ask sandboxd for the ICA address the Cosmos GMP module will use to
-#      sign MsgIFTMint when a packet arrives from the EVM TestIFT proxy.
+#      sign MsgIFTMint when a packet arrives from the EVM IFTOwnable proxy.
 #   2. Deploy CosmosIFTSendCallConstructor from compiled bytecode, wiring the
 #      ICA + type URL + denom into it (MinimalDeploy skipped this contract
 #      because IFT_ICA_ADDRESS wasn't known at forge-deploy time).
-#   3. Call TestIFT.registerIFTBridge(clientId, icaAddress, constructor) so
-#      TestIFT.iftTransfer can wrap iftTransfer → ICS27GMP.sendCall with a
+#   3. Call IFTOwnable.registerIFTBridge(clientId, icaAddress, constructor) so
+#      IFTOwnable.iftTransfer can wrap iftTransfer → ICS27GMP.sendCall with a
 #      correctly-signed MsgIFTMint payload.
 register_evm_ift_bridge() {
   [[ -n "$IFT_CONTRACT_ADDR" ]]      || { warn "IFT_CONTRACT_ADDR not set — skipping EVM IFT bridge"; return 0; }
@@ -811,7 +851,7 @@ register_evm_ift_bridge() {
   # prior run). If state.env's ICA differs (e.g. it was written by an
   # earlier setup that queried with the wrong-cased sender), fall through
   # to redeploy the constructor with the correct ICA and re-register the
-  # bridge on TestIFT — overwriting the stale registration.
+  # bridge on IFTOwnable — overwriting the stale registration.
   if [[ "${IFT_ICA_ADDRESS:-}" == "$ica" && -n "${IFT_CTOR_ADDR:-}" && -n "${COSMOS_IFT_MODULE_ADDR:-}" ]]; then
     log "EVM IFT bridge already registered with correct ICA — skipping"
     return 0
@@ -820,11 +860,11 @@ register_evm_ift_bridge() {
     log "Stale EVM IFT bridge state detected:"
     log "  state.env: $IFT_ICA_ADDRESS"
     log "  expected:  $ica"
-    log "  → redeploying CosmosIFTSendCallConstructor + re-registering bridge on TestIFT"
+    log "  → redeploying CosmosIFTSendCallConstructor + re-registering bridge on IFTOwnable"
   fi
 
   # 1b. Cosmos IFT module account — the `.sender` in outgoing GMP packets
-  #     FROM Cosmos (different from the ICA!). TestIFT.iftMint checks that
+  #     FROM Cosmos (different from the ICA!). IFTOwnable.iftMint checks that
   #     bridge.counterpartyIFTAddress == packet.sender; failing that check
   #     is what caused the last run's silent `IFTUnauthorizedMint` revert,
   #     making the relayer report COMPLETE while EVM balance stayed 0.
@@ -837,9 +877,9 @@ register_evm_ift_bridge() {
   log "  Cosmos IFT module: $cosmos_ift_module"
 
   # 2. Deploy CosmosIFTSendCallConstructor(typeUrl, denom, icaAddress).
-  #    Bytecode comes from the forge build output in $SOLIDITY_IBC_DIR/out/.
-  local ctor_abi="$SOLIDITY_IBC_DIR/out/CosmosIFTSendCallConstructor.sol/CosmosIFTSendCallConstructor.json"
-  [[ -f "$ctor_abi" ]] || die "CosmosIFTSendCallConstructor artefact missing: $ctor_abi"
+  #    Bytecode comes from the prebuilt release bundle (release-bytecode/).
+  local ctor_abi="$SOLIDITY_IBC_DIR/release-bytecode/CosmosIFTSendCallConstructor.json"
+  [[ -f "$ctor_abi" ]] || die "CosmosIFTSendCallConstructor artefact missing: $ctor_abi (run fetch_release_bytecode)"
 
   local bytecode
   bytecode=$(jq -r '.bytecode.object' "$ctor_abi")
@@ -868,18 +908,18 @@ register_evm_ift_bridge() {
     die "CosmosIFTSendCallConstructor deployment failed — check Besu logs"
   log "  CosmosIFTSendCallConstructor: $ctor_addr"
 
-  # 3. Register the bridge on TestIFT. counterpartyIFTAddress is the Cosmos
+  # 3. Register the bridge on IFTOwnable. counterpartyIFTAddress is the Cosmos
   #    IFT module account (the packet sender), NOT the ICA. IFTBase.iftMint
   #    enforces bridge.counterpartyIFTAddress == accountId.sender; registering
   #    the ICA here would pass the first two checks and then revert silently
   #    on the sender-match check, which manifests as "relay complete but
   #    EVM balance 0".
-  log "  TestIFT.registerIFTBridge(client=$EVM_CLIENT_ID, module=$cosmos_ift_module, ctor=$ctor_addr)..."
+  log "  IFTOwnable.registerIFTBridge(client=$EVM_CLIENT_ID, module=$cosmos_ift_module, ctor=$ctor_addr)..."
   cast_in_net send "$IFT_CONTRACT_ADDR" \
     "registerIFTBridge(string,string,address)" \
     "$EVM_CLIENT_ID" "$cosmos_ift_module" "$ctor_addr" \
     --rpc-url "http://besu:8545" --private-key "$ETH_VALIDATOR_PRIVKEY" 2>/dev/null \
-    || die "TestIFT.registerIFTBridge failed — check authority / access control on TestIFT"
+    || die "IFTOwnable.registerIFTBridge failed — check authority / access control on IFTOwnable"
 
   IFT_ICA_ADDRESS="$ica"
   IFT_CTOR_ADDR="$ctor_addr"
@@ -916,7 +956,8 @@ setup_ibc() {
   # reconcile_ibc_client_pair clears stale client IDs on its own if the
   # on-chain counterparty pair doesn't match.
 
-  run_phase "Phase 4A0: Fetch solidity-ibc-eureka source" fetch_solidity_ibc
+  run_phase "Phase 4A0: Prepare forge workspace"          prepare_forge_workspace
+  run_phase "Phase 4A0b: Fetch release bytecode bundle"   fetch_release_bytecode
   run_phase "Phase 4A:  Deploy IBC contracts on Besu"     deploy_ibc_contracts
   run_phase "Phase 4A1: Resolve IFT ERC20 address"        deploy_ift_contracts
   run_phase "Phase 4C:  Resolve relayer wallet"           setup_relayer_key

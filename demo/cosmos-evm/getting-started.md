@@ -20,7 +20,7 @@ trusts those signatures.
 ┌─────────────────────────────┐                ┌─────────────────────────────┐
 │  Chain A: Cosmos (sandbox)  │   ◄────────►   │  Chain B: Ethereum (Besu)   │
 │  CometBFT consensus         │  IBC v2 over   │  QBFT consensus (1 sealer)  │
-│  uatom + uift tokens        │   attestation  │  TestIFT ERC20 (UIFT/uift)  │
+│  uatom + uift tokens        │   attestation  │  IFTOwnable ERC20 (UIFT)    │
 └─────────────────────────────┘                └─────────────────────────────┘
 ```
 
@@ -79,8 +79,9 @@ layer process. One container produces blocks and serves the EVM.
 
 Tokens on this chain:
 - ETH for gas (pre-funded validator account)
-- `TestIFT` — an ERC20-style proxy contract deployed at startup; this is
-  what gets minted when IFT packets arrive from Cosmos.
+- `IFTOwnable` — an ERC20-style proxy contract deployed at startup
+  (`name() = "Test uift"`, `symbol() = "UIFT"`); this is what gets minted
+  when IFT packets arrive from Cosmos.
 
 ---
 
@@ -104,20 +105,19 @@ of the chain's app.
 ### On EVM: Solidity contracts on Besu
 
 These get deployed by `forge script "$DEPLOY_SCRIPT"` in Phase 4A. The
-default script is upstream's `scripts/E2ETestDeploy.s.sol` (deploys the
-full IBC stack including ICS20Transfer + SP1 verifiers + TestERC20, even
-though this demo only uses three of the contracts it produces). A
-trimmed alternative is committed at
-[`ibc/scripts/MinimalDeploy.s.sol`](ibc/scripts/MinimalDeploy.s.sol) —
-deploys just the contracts this demo actually wires (AccessManager +
-ICS26Router + ICS27GMP + ICS27Account + TestIFT, ~half the gas). To use
-it, set `DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol` (any `*.s.sol` you
-drop into `ibc/scripts/` is auto-copied into the fetched source tree
-before forge runs).
+default script is
+[`ibc/forge/scripts/MinimalDeploy.s.sol`](ibc/forge/scripts/MinimalDeploy.s.sol) —
+a self-contained deploy that pulls eureka contract bytecode from a
+**prebuilt release tarball** (`solidity-contracts-$SOLIDITY_RELEASE_TAG.tar.gz`)
+and deploys it via `vm.getCode` + the `CREATE` opcode. No
+`solidity-ibc-eureka` source clone is needed; the forge project is the
+committed skeleton at `ibc/forge/` (foundry.toml + package.json with
+just OpenZeppelin and forge-std).
 
-One contract is **not** in either deploy script: `AttestationLightClient`
+One contract is **not** in the deploy script: `AttestationLightClient`
 is deployed standalone in Phase 4E3 because its constructor needs
 runtime values (current Cosmos height/timestamp + attestor address).
+It's also loaded from `release-bytecode/AttestationLightClient.json`.
 
 | Contract | Role |
 |----------|------|
@@ -125,7 +125,7 @@ runtime values (current Cosmos height/timestamp + attestor address).
 | `AttestationLightClient` | Verifies Cosmos state. Trusts an `m-of-n` attestor set; `verifyMembership` checks signatures over packet commitments. Replaces the SP1ICS07Tendermint contract used in earlier setups. |
 | `ICS27GMP` | The GMP app on port `gmpport`. Receives packets from `ICS26Router`, dispatches them to an Interchain Account. |
 | `ICS27Account` (CREATE2 proxy) | The Interchain Account itself — a per-(client, sender, salt) contract that executes the actual call on the EVM side. |
-| `TestIFT` | The ERC20-style IFT token. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — same letters as the Cosmos `uift` denom so balances on both sides surface matching names. Has `iftTransfer` (outbound) and `iftMint` (called via the Interchain Account when a Cosmos→EVM packet arrives). |
+| `IFTOwnable` | The ERC20-style IFT token. ERC20 surface: `name() = "Test uift"`, `symbol() = "UIFT"` — same letters as the Cosmos `uift` denom so balances on both sides surface matching names. Has `iftTransfer` (outbound) and `iftMint` (called via the Interchain Account when a Cosmos→EVM packet arrives). |
 | `CosmosIFTSendCallConstructor` | Helper deployed once, baked with `(typeUrl, denom, ICA address)`. Encodes the `cosmostx` payload that EVM→Cosmos transfers send. |
 
 ---
@@ -185,17 +185,17 @@ clients.
          └─ AttestationLightClient.verifyMembership: checks sigs at height H
          └─ ICS27GMP.onRecvPacket
               └─ ICS27Account (CREATE2'd from clientId+sender+salt) executes:
-                  TestIFT.iftMint(0xRECIPIENT, 1000000)
+                  IFTOwnable.iftMint(0xRECIPIENT, 1000000)
 
-5. 0xRECIPIENT now holds 1000000 TestIFT on EVM.
+5. 0xRECIPIENT now holds 1000000 UIFT on EVM.
 ```
 
 ### EVM → Cosmos (mirror)
 
 ```
-1. cast send TestIFT "iftTransfer(string,string,uint256,uint64)"
+1. cast send IFTOwnable "iftTransfer(string,string,uint256,uint64)"
               client-0 cosmos1...recipient 1000000 <timeout>
-   └─ TestIFT burns 1000000 from msg.sender
+   └─ IFTOwnable burns 1000000 from msg.sender
    └─ Builds a cosmostx payload via CosmosIFTSendCallConstructor
         (encodes MsgIFTMint{coin, receiver, signer: ICA})
    └─ Calls ICS27GMP.sendCall on port "gmpport"
@@ -227,13 +227,13 @@ on EVM→Cosmos.
 The two key addresses to keep separate in the EVM→Cosmos direction
 (easy to confuse, breaks minting silently if you swap them):
 
-- **ICA** (queried via `sandboxd query gmp get-address <client> <TestIFT> ""`)
+- **ICA** (queried via `sandboxd query gmp get-address <client> <IFTOwnable> ""`)
   is the *signer* of MsgIFTMint on Cosmos. Baked into
   `CosmosIFTSendCallConstructor`.
 - **Cosmos IFT module account** (queried via
   `sandboxd query auth module-account ift`) is the `.sender` field in
   GMP packets *from* Cosmos. Stored as `counterpartyIFTAddress` in
-  `TestIFT.registerIFTBridge` so the auth check on the EVM side passes.
+  `IFTOwnable.registerIFTBridge` so the auth check on the EVM side passes.
 
 ---
 
@@ -262,7 +262,7 @@ Each step is idempotent — safe to re-run if something fails.
 ```bash
 ./setup.sh chains           # 1. start Cosmos + Besu
 
-./setup.sh deploy           # Step 1/5: fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh deploy           # Step 1/5: prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
 ./setup.sh attestors        # Step 2/5: generate keystore + configs, start attestors
 ./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations, start relayer + proof-api
 ./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
@@ -294,23 +294,25 @@ swap in a different artifact:
 
 | Variable | Purpose |
 |----------|---------|
-| `SOLIDITY_IBC_DIR` | Local checkout; otherwise auto-downloaded (`SOLIDITY_IBC_TAG`) |
+| `SOLIDITY_IBC_DIR` | Forge workspace path override (default: `ibc/forge/`) |
+| `SOLIDITY_RELEASE_TAG` | Pin a different solidity-ibc-eureka release for the prebuilt bytecode tarball (default: `solidity-v3.0.0-rc.1`) |
 | `ICS26_ROUTER_ADDR` | Skip forge deploy (use a pre-deployed router) |
 | `EVM_ATTESTATION_LC_ADDR` | Skip AttestationLightClient deploy |
-| `DEPLOY_SCRIPT` | Forge deploy script (default: `scripts/E2ETestDeploy.s.sol`) |
+| `DEPLOY_SCRIPT` | Forge deploy script (default: `scripts/MinimalDeploy.s.sol` inside `ibc/forge/`) |
 
 ```bash
-# Use the trimmed deploy script (drops unused upstream contracts):
-DEPLOY_SCRIPT=scripts/MinimalDeploy.s.sol ./setup.sh
+# Pin a specific solidity-ibc-eureka release for the prebuilt bytecode:
+SOLIDITY_RELEASE_TAG=solidity-v3.0.0-rc.1 ./setup.sh
 
 # Use a pre-deployed contract set (skips Phase 4A entirely):
 ICS26_ROUTER_ADDR=0x… ICS27_GMP_ADDR=0x… IFT_CONTRACT_ADDR=0x… ./setup.sh
 ```
 
-First run pulls ~14 docker images and downloads two source tarballs
-(solidity-ibc-eureka, ibc-relayer); subsequent runs are fully offline.
-Plan for ~5 GB of disk, 4 GB of RAM. Host needs `docker` (with the
-compose plugin), `jq`, `curl`, `openssl`, `perl`, and `bash`.
+First run pulls ~14 docker images and downloads two GitHub tarballs
+(the `solidity-ibc-eureka` release-bytecode bundle and ibc-relayer
+migrations); subsequent runs are fully offline. Plan for ~5 GB of disk,
+4 GB of RAM. Host needs `docker` (with the compose plugin), `jq`,
+`curl`, `openssl`, `perl`, and `bash`.
 
 ---
 
@@ -324,7 +326,8 @@ compose plugin), `jq`, `curl`, `openssl`, `perl`, and `bash`.
 - [`lib/`](lib/) — the actual shell modules. `lib/ibc.sh` is the meat
   (Phase 4: contract deploys, client creation, IFT bridge wiring).
 - [`ibc/`](ibc/) — config templates (rendered into `ibc/local/` at
-  runtime) and downloaded source tarballs.
+  runtime), the committed forge workspace at `ibc/forge/`, and runtime
+  state in `ibc/state.env`.
 
 ## Inspecting balances yourself
 
@@ -338,7 +341,7 @@ curl -s 'http://localhost:1317/cosmos/bank/v1beta1/balances/<addr>/by_denom?deno
 
 # EVM (eth_call → hex result, piped through printf for decimal):
 curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' \
-  -d '{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"<TestIFT-addr>","data":"0x70a08231<padded-addr>"},"latest"],"id":1}' \
+  -d '{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"<IFT_CONTRACT_ADDR>","data":"0x70a08231<padded-addr>"},"latest"],"id":1}' \
   | jq -r .result | xargs printf '%d\n'
 ```
 
@@ -346,7 +349,7 @@ The Cosmos REST is straightforward; the EVM side is verbose because
 ERC20 balances live in contract storage, not at the top-level account
 state. `eth_getBalance` only returns *native ETH*, not ERC20 token
 balances — that's why the demo always uses `eth_call → balanceOf` for
-TestIFT/UIFT.
+the IFTOwnable (UIFT) token.
 
 ---
 
@@ -360,7 +363,9 @@ After a setup run, you'll find:
 | `cosmos/local/ibc_*_state.json` | Phase 4B5b | rendered LC ClientState + ConsensusState |
 | `ibc/local/{config.yml,keys.json,relayer.json,attestor*.toml,.ibc-attestor/}` | Phase 4D/4D1/keystore generator | relayer + attestor + proof-api configs |
 | `ibc/state.env` | every phase via `state_set` | accumulated addresses + IDs (no duplicates — `state_set` does in-place key replace) |
-| `ibc/solidity-ibc-eureka-<tag>/` | Phase 4A0 | downloaded contract source (~50 MB) |
+| `ibc/forge/release-bytecode/` | Phase 4A0b | prebuilt eureka contract artifacts (~150 KB) from the `solidity-contracts-$SOLIDITY_RELEASE_TAG.tar.gz` release |
+| `ibc/forge/node_modules/` | Phase 4A0 (`bun install`) | OpenZeppelin + forge-std (~200 MB) |
+| `ibc/forge/{out,cache,broadcast}/` | Phase 4A (forge) | compile output + broadcast receipts |
 | `evm/key` | Phase 1B | Besu node private key — derives the QBFT validator address |
 
 `./setup.sh clean` removes all of these and wipes the docker volumes.

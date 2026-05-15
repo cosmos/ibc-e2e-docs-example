@@ -198,11 +198,18 @@ clean() {
   log "Stopping containers and removing data..."
   docker compose down -v --remove-orphans 2>/dev/null || true
 
+  # Wipe runtime artifacts under the committed forge workspace ($IBC_DIR/forge),
+  # but leave the checked-in skeleton (foundry.toml, package.json, scripts/, …)
+  # in place so a re-run picks up immediately.
   _clean_path \
     "$COSMOS_CFG_DIR/local" \
     "$IBC_DIR/local" \
     "$IBC_DIR/state.env" \
-    "$IBC_DIR"/solidity-ibc-eureka-* \
+    "$IBC_DIR/forge/out" \
+    "$IBC_DIR/forge/cache" \
+    "$IBC_DIR/forge/broadcast" \
+    "$IBC_DIR/forge/release-bytecode" \
+    "$IBC_DIR/forge/node_modules" \
     "$IBC_DIR"/ibc-relayer-*
 
   log "Clean done"
