@@ -27,7 +27,8 @@
 #   templates/      — config templates (rendered via render_template)
 #
 # Environment (optional):
-#   SOLIDITY_IBC_DIR        — local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
+#   SOLIDITY_IBC_DIR        — forge workspace (default: ibc/forge/)
+#   SOLIDITY_RELEASE_TAG    — solidity-ibc-eureka release tag for prebuilt bytecode
 #   ICS26_ROUTER_ADDR       — skip forge deploy
 #   EVM_ATTESTATION_LC_ADDR — skip AttestationLightClient deploy
 #
@@ -85,12 +86,14 @@ ETH_VALIDATOR_ADDR="0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 ETH_VALIDATOR_PRIVKEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 # IBC (Phase 4)
-SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-}"
-# Default to main: the latest tagged release (solidity-v2.0.1) predates
-# ICS27GMP.sol, which is required for IFT end-to-end (IFT routes packets
-# through GMP on port "gmpport";
-# Pin to a specific tag once main stabilises an ICS27-aware release.
-SOLIDITY_IBC_TAG="${SOLIDITY_IBC_TAG:-main}"
+# Forge workspace: committed skeleton at ibc/forge/ (foundry.toml, package.json,
+# scripts/MinimalDeploy.s.sol). Override SOLIDITY_IBC_DIR to point at a custom
+# forge project root.
+SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-$IBC_DIR/forge}"
+# Release tag for the prebuilt contract bytecode bundle consumed by
+# scripts/MinimalDeploy.s.sol (loaded via vm.getCode from the unpacked
+# release-bytecode/ directory; see lib/ibc.sh::fetch_release_bytecode).
+SOLIDITY_RELEASE_TAG="${SOLIDITY_RELEASE_TAG:-solidity-v3.0.0-rc.1}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/MinimalDeploy.s.sol}"
 ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
 # AttestationLightClient on EVM — replaces SP1ICS07Tendermint. Deployed by
@@ -135,10 +138,11 @@ source "$LIB_DIR/demo.sh"
 
 # ─── Sub-commands ──────────────────────────────────────────────────────────────
 
-# Step 1 of 5: fetch source + deploy IBC/IFT contracts on Besu.
+# Step 1 of 5: prepare forge workspace + deploy IBC/IFT contracts on Besu.
 cmd_deploy() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
-  run_phase "deploy: Fetch solidity-ibc-eureka source"  fetch_solidity_ibc
+  run_phase "deploy: Prepare forge workspace"           prepare_forge_workspace
+  run_phase "deploy: Fetch release bytecode bundle"     fetch_release_bytecode
   run_phase "deploy: Deploy IBC contracts on Besu"      deploy_ibc_contracts
   run_phase "deploy: Resolve IFT ERC20 address"         deploy_ift_contracts
   log "Deploy complete. Run './setup.sh attestors' next."
@@ -230,7 +234,8 @@ DEMOS:
                       all         — run all demos (default)
 
 ENVIRONMENT (optional):
-  SOLIDITY_IBC_DIR        Local checkout; otherwise auto-downloaded (SOLIDITY_IBC_TAG)
+  SOLIDITY_IBC_DIR        Forge workspace (default: ibc/forge/)
+  SOLIDITY_RELEASE_TAG    solidity-ibc-eureka release tag for prebuilt bytecode
   ICS26_ROUTER_ADDR       Skip forge deploy
   EVM_ATTESTATION_LC_ADDR Skip AttestationLightClient deploy
 

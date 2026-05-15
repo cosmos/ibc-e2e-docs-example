@@ -184,7 +184,7 @@ demo_cosmos_to_evm_transfer() {
     fi
   fi
 
-  # For IFT-routed packets the balance lands in TestIFT (IFT_CONTRACT_ADDR);
+  # For IFT-routed packets the balance lands in IFTOwnable (IFT_CONTRACT_ADDR);
   # resolve_ibc_erc20_addr returns it via the COSMOS_IFT_DENOM shortcut.
   local path="transfer/${EVM_CLIENT_ID}/${denom}"
   local erc20
@@ -278,7 +278,7 @@ demo_evm_to_cosmos_transfer() {
 
   log "  from   : $ETH_VALIDATOR_ADDR (EVM)"
   log "  to     : $receiver (Cosmos)"
-  log "  token  : TestIFT @ $IFT_CONTRACT_ADDR"
+  log "  token  : IFTOwnable @ $IFT_CONTRACT_ADDR"
   log "  denom  : $COSMOS_IFT_DENOM"
   log "  amount : $amount"
   log "  client : $EVM_CLIENT_ID"
@@ -289,7 +289,7 @@ demo_evm_to_cosmos_transfer() {
   local c_before="$_SNAP_COSMOS_BAL" e_before="$_SNAP_EVM_BAL"
   print_balance_curl_cmds "$receiver" "$COSMOS_IFT_DENOM" "$IFT_CONTRACT_ADDR" "$ETH_VALIDATOR_ADDR"
 
-  # TestIFT.iftTransfer(string clientId, string receiver, uint256 amount, uint64 timeoutTimestamp)
+  # IFTOwnable.iftTransfer(string clientId, string receiver, uint256 amount, uint64 timeoutTimestamp)
   # Burns on EVM, wraps payload via CosmosIFTSendCallConstructor, calls
   # ICS27GMP.sendCall on port "gmpport".
   local tx_out
@@ -300,8 +300,8 @@ demo_evm_to_cosmos_transfer() {
 
   EVM_TO_COSMOS_TX_HASH=$(echo "$tx_out" | jq -r '.transactionHash // empty' 2>/dev/null || echo "")
   if [[ -z "$EVM_TO_COSMOS_TX_HASH" ]]; then
-    warn "TestIFT.iftTransfer failed — check Besu logs and verify"
-    warn "    - TestIFT.registerIFTBridge was called (IFT_ICA_ADDRESS / IFT_CTOR_ADDR set)"
+    warn "IFTOwnable.iftTransfer failed — check Besu logs and verify"
+    warn "    - IFTOwnable.registerIFTBridge was called (IFT_ICA_ADDRESS / IFT_CTOR_ADDR set)"
     warn "    - ETH_VALIDATOR_ADDR has an IFT balance (lazy-mint happened)"
     log "╚═════════════════════════════════════════════════════════════════════════╝"
     return 0
