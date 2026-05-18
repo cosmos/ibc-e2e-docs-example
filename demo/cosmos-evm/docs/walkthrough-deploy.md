@@ -12,7 +12,7 @@ Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/c
 
 ## What it does
 
-The script fetches [`cosmos/solidity-ibc-eureka`](https://github.com/cosmos/solidity-ibc-eureka), installs dependencies, then runs the following inside a Foundry container on the Docker network (RPC target is `http://besu:8545` internally):
+The script uses the committed forge workspace at [`ibc/forge/`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/forge/) and downloads prebuilt contract bytecode from the [`cosmos/solidity-ibc-eureka`](https://github.com/cosmos/solidity-ibc-eureka) release bundle. Dependencies are installed via `bun install` if not already present. Then the following runs inside a Foundry container on the Docker network (RPC target is `http://besu:8545` internally):
 
 ```bash
 forge script scripts/MinimalDeploy.s.sol \
@@ -28,7 +28,7 @@ See the table below for the full deploy order and constructor arguments.
 
 ## Deployed Contracts
 
-The following steps are run by [`MinimalDeploy.s.sol`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/scripts/MinimalDeploy.s.sol) in order. Each contract's constructor or initializer depends on addresses from the steps before it.
+The following steps are run by [`MinimalDeploy.s.sol`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/forge/scripts/MinimalDeploy.s.sol) in order. Each contract's constructor or initializer depends on addresses from the steps before it.
 
 | Step | Source | Purpose | Notes |
 | --- | --- | --- | --- |
@@ -37,7 +37,7 @@ The following steps are run by [`MinimalDeploy.s.sol`](https://github.com/cosmos
 | 3. `ICS27Account` | [contracts/utils/ICS27Account.sol](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/ICS27Account.sol) | CREATE2 proxy account used by `ICS27GMP` to derive and hold a client-derived account address | No constructor arguments |
 | 4. `ICS27GMP` (ERC1967 proxy) | [contracts/ICS27GMP.sol](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/ICS27GMP.sol) | ICS-27 General Message Passing app: parses GMP payloads and dispatches calls to target contracts | Initialized with the `ICS26Router`, `ICS27Account`, and `AccessManager` addresses |
 | 5. `ICS26Router.addIBCApp` | - | Registers `ICS27GMP` as the handler for `gmpport` | Must be called before any packets can be routed to GMP |
-| 6. `TestIFT` (ERC-20, ERC1967 proxy) | [test/solidity-ibc/mocks/TestIFT.sol](https://github.com/cosmos/solidity-ibc-eureka/blob/main/test/solidity-ibc/mocks/TestIFT.sol) | IFT token: `iftTransfer` burns tokens and emits an IBC packet; `iftMint` mints on packet receive | Initialized with the deployer address, token name/symbol, and the `ICS27GMP` address |
+| 6. `IFTOwnable` (ERC-20, ERC1967 proxy) | [`cosmos/solidity-ibc-eureka`](https://github.com/cosmos/solidity-ibc-eureka) | IFT token: `iftTransfer` burns tokens and emits an IBC packet; `iftMint` mints on packet receive | Initialized with the deployer address, token name/symbol, and the `ICS27GMP` address |
 
 Two more contracts are deployed in later steps:
 
