@@ -54,7 +54,7 @@ Once complete, these containers are running:
 ./setup.sh chains     # start Cosmos and Besu only (skip IBC setup)
 ./setup.sh ibc        # run all IBC setup steps below on already-running chains
 
-./setup.sh deploy           # Step 1/5: fetch solidity-ibc-eureka + deploy IBC/IFT contracts on Besu
+./setup.sh deploy           # Step 1/5: prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
 ./setup.sh attestors        # Step 2/5: generate keystore + configs, start attestors
 ./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations, start relayer + proof-api
 ./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
