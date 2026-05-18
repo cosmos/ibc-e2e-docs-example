@@ -30,7 +30,7 @@
 
 ## 4. Deploy EVM Contracts
 - `./setup.sh deploy`
-- What the script does: fetches `cosmos/solidity-ibc-eureka`, runs `MinimalDeploy.s.sol`
+- What the script does: prepares the committed forge workspace at `ibc/forge/`, downloads prebuilt contract bytecode from the solidity-ibc-eureka release, runs `MinimalDeploy.s.sol`
 - Contracts deployed and why (brief — full detail in contract-deployment.md)
 - Output: `ics26Router`, `ics27Gmp`, `ift` addresses used in all subsequent steps
 - → See contract-deployment.md
@@ -129,7 +129,7 @@
      - This is the Cosmos account the GMP module uses to authorize `MsgIFTMint` on inbound packets
   2. Query Cosmos IFT module account: `query auth module-account ift`
   3. Deploy `CosmosIFTSendCallConstructor(typeUrl, denom, gmpDerivedAddress)`
-  4. Call `TestIFT.registerIFTBridge(evm_client_id, cosmos_ift_module_addr, ctor_addr)`
+  4. Call `IFTOwnable.registerIFTBridge(evm_client_id, cosmos_ift_module_addr, ctor_addr)`
 
 ### Finalize relayer config
 - Re-render `config.yml` with `counterparty_chains` mappings now that both client IDs are known
