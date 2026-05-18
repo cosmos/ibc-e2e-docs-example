@@ -32,7 +32,7 @@ On the EVM side, the same components are mirrored as Solidity contracts from [co
 
 - Core IBC Contracts (`ICS26Router`, `ICS27GMP`, `ICS27Account`): the core IBC contract stack, including the ICS-26 Router and ICS-27 GMP + Callbacks contracts.
 - Attestation Light Client (`AttestationLightClient`): the Solidity implementation of the same attestation-based light client, verifying packets using quorum-signed ECDSA attestations from the same trusted signer set. [See below for more info](#attestation-light-client).
-- Interchain Fungible Token ([`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) / `TestIFT`): a set of interfaces for creating and managing fungible tokens that can be transferred across chains using ICS-27 GMP.
+- Interchain Fungible Token ([`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) / `IFTOwnable`): a set of interfaces for creating and managing fungible tokens that can be transferred across chains using ICS-27 GMP.
 
 ### IFT (Interchain Fungible Token)
 
