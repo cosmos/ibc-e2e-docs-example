@@ -3,7 +3,7 @@
 After the previous step, both chains have a light client for the counterparty, but nothing yet connects them. This step does three things:
 
 - **Links the two clients**: registers each client's counterparty on-chain so the IBC module knows which client to use when sending packets.
-- **Wires the IFT application bridge**: tells each chain's IFT module which addresses and denoms correspond across chains, and what to mint or burn when a packet arrives.
+- **Wires the IFT application bridge**: tells each chain's IFT module/contract which addresses and denoms correspond across chains, and what to mint or burn when a packet arrives.
 - **Tells the relayer which connections to watch**: updates the relayer config with the client IDs it should relay for.
 
 Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
@@ -119,6 +119,4 @@ The GMP account address is deterministically derived from `(client_id, contract_
 
 ## Next steps
 
-<!-- todo: add link -->
-
-With the bridge wired, the next step sends a live token transfer and validates the full packet relay flow.
+With the bridge wired, the [next step](walkthrough-transfer.md) sends a live token transfer and validates the full packet relay flow.

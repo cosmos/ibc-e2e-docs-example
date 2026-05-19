@@ -35,7 +35,7 @@ The following are the IBC modules required for Cosmos-to-EVM IFT transfers that 
 | [`tokenfactory`](https://github.com/cosmos/ibc-go/tree/prototype-ift-tokenfactory/modules/apps/prototypes/tokenfactory) | `ibc-go/v11` | Permissionless `factory/<creator>/<subdenom>` token creation with admin-gated mint and burn |
 | [`ift`](https://github.com/cosmos/ibc-go/tree/prototype-ift-tokenfactory/modules/apps/prototypes/ift) | `ibc-go/v11` | The IFT bridge module — pairs a tokenfactory denom with a counterparty IFT contract and handles cross-chain burn/mint |
 
-> **Note:** The `tokenfactory` and `ift` Cosmos modules are reference implementations and should be tested throughly before integrating into production. The IFT Solidity contracts on the EVM side are enterprise-ready.
+> **Note:** The `tokenfactory` and `ift` Cosmos modules are reference implementations and should be tested thoroughly before integrating into production. The IFT Solidity contracts on the EVM side are enterprise-ready.
 
 ### EVM: Hyperledger Besu
 
@@ -45,7 +45,7 @@ The demo uses:
 - Chain ID: `32382`
 - Block period: 2 seconds
 - Consensus: QBFT (single-validator, no peer discovery)
-- Funded account: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (This is a well-known Hardhat test key. Do not use this with real funds)
+- Funded account: `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` (This is a test key. Do not use this with real funds)
 
 Besu is configured via [`evm/besu.toml`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/evm/besu.toml) and [`evm/el-genesis.json`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/evm/el-genesis.json). The genesis file encodes the single QBFT validator in the `extraData` field and sets all EVM hardfork blocks to 0 (Cancun-compatible from genesis).
 
@@ -86,7 +86,7 @@ Besu (Ethereum EL)
 
 ## Applying this to your own chains
 
-For a real integration the chains are already running. What matters is that the Cosmos chain has all the IBC modules listed in the [table above](#cosmos-sandbox-ledger) installed and wired.
+For a real integration, your chains are most likely already running. What matters is that the Cosmos chain has all the IBC modules listed in the [table above](#cosmos-sandbox-ledger) installed and wired.
 
 When wiring the keepers in `app.go`, the initialization order is fixed: `TokenFactoryKeeper` must be created before `GMPKeeper`, and both must exist before `IFTKeeper`, since the IFT keeper takes the other two as dependencies.
 
@@ -94,8 +94,6 @@ The IBC v2 port routing is set in [`app/app.go`](https://github.com/cosmos/sandb
 
 - [`gmpport`](https://github.com/cosmos/sandbox-ledger/blob/main/app/app.go#L549) routes to the GMP module, wrapped in callbacks-v2 middleware so the IFT keeper receives ack and timeout callbacks.
 - The [`transfer` port](https://github.com/cosmos/sandbox-ledger/blob/main/app/app.go#L507) routes through transfer-v2 and erc20-v2 middleware.
-
-Because this chain registers only the `attestations` light client, it cannot open an IBC connection to a standard Tendermint chain via `07-tendermint`. Every counterparty must support attestation-based verification.
 
 You can refer to [PR #1](https://github.com/cosmos/sandbox-ledger/pull/1/files#diff-d1a13e056897040ff4a79d865527c9964974cd376af3293d25ac045df8c6fa50) in the sandbox-ledger repo as a reference of the changes needed to add IBC v2 and IFT support to an existing Cosmos SDK chain.
 
