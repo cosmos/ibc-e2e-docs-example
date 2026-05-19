@@ -49,6 +49,8 @@ Once complete, these containers are running:
 
 ## All Commands
 
+The command you ran earlier shows the full end-to-end flow of the demo. However, you can also run individual commands that break up the flow so you can see how each step works.
+
 ```bash
 ./setup.sh            # full setup: chains + IBC + demos
 ./setup.sh chains     # start Cosmos and Besu only (skip IBC setup)
@@ -73,6 +75,12 @@ Once complete, these containers are running:
 ./setup.sh help       # list all commands and configurable environment variables
 ```
 
-The next sections of this tutorial walks you through each step of the demo, showing you how chains are set up, what each service does, and what to look for at each stage.
+The next sections of this tutorial are a walkthrough that breaks up each step of the demo and shows you how chains are set up, what each service does, and what to look for at each stage.
+
+Before continuing through the walkthrough, make sure to run the following to stop and containers and start fresh:
+
+```bash
+./setup.sh clean      # stop all containers and wipe state
+```
 
 <!-- todo: add list of walkthrough sections and links -->

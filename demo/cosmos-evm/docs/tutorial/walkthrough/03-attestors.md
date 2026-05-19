@@ -2,15 +2,20 @@
 
 An attestor is a lightweight, stateless service ([cosmos/ibc-attestor](https://github.com/cosmos/ibc-attestor)) that watches a chain and signs statements about its state on demand. When the Proof API needs to prove that a packet was committed on a chain, it queries the attestor for a signed attestation over the relevant block state. The attestor does not store or push data; it reads the chain and signs only when asked.
 
-In this demo, two instances run per deployment: one watching the EVM chain and one watching the Cosmos chain. Each attestor signs with a secp256k1 key; the corresponding Ethereum address is registered with the attestation light clients on both chains (this happens in a later step). When a packet arrives, the light client recovers the signer address from the attestation signature and checks it against its registered set. In this demo, both instances share a single signing key so only one address needs to be registered. In production, you would run multiple attestor operators with distinct keys and configure the light clients with a quorum threshold greater than one.
+In this demo, two instances run per deployment: one watching the EVM chain and one watching the Cosmos chain. Each attestor signs with a secp256k1 key; the corresponding Ethereum address is registered with the attestation light clients on both chains (this happens in a later step). When a packet arrives, the light client recovers the signer address from the attestation signature and checks it against its registered set. 
+
+In this demo, both instances share a single signing key so only one address needs to be registered. In production, you would run multiple attestor operators with distinct keys and configure the light clients with a quorum threshold greater than one.
 
 > The attestor address must exist before the `create-clients` step because it is baked into both light clients at creation time.
 
-Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
+Run the following:
 
 ```bash
 ./setup.sh attestors
 ```
+
+The logic for this command is in [`lib/ibc.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/ibc.sh)
+
 
 ## What it does
 
@@ -89,7 +94,7 @@ keystore_path = "/config/.ibc-attestor/ibc-attestor-keystore"
 
 ## Production deployment
 
-For production deployment (remote signers, key rotation, multi-instance quorum, finality configuration, and health checking), see the [IBC Attestor deployment guide](attestor/deploy-attestor.md).
+For production deployment (remote signers, key rotation, multi-instance quorum, finality configuration, and health checking), see the [IBC Attestor deployment guide](../../attestor/deploy-attestor.md).
 
 <!-- todo: fix link above -->
 

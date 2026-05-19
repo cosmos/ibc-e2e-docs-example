@@ -1,18 +1,20 @@
 # Step 2: Deploy EVM Contracts
 
-The IBC stack on the EVM side is a set of Solidity contracts deployed to Besu. This step deploys the core contracts (the IBC router, the GMP application, and the IFT token) and registers the GMP port on the router so it can route packets.
+The IBC stack on the EVM side is a set of Solidity contracts deployed to the Besu chain in the demo. This step deploys the core contracts (the IBC router, the GMP application, and the IFT token) and registers the GMP port on the router so it can route packets.
 
 Two additional contracts are deployed in later steps: `AttestationLightClient` in `create-clients` once the attestor address is known, and `CosmosIFTSendCallConstructor` in `wire` once the client-derived account address is derived.
 
-Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
+This command runs the deployment:
 
 ```bash
 ./setup.sh deploy
 ```
 
+The logic for this command is in [`lib/ibc.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/ibc.sh).
+
 ## What it does
 
-The script uses the committed forge workspace at [`ibc/forge/`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/forge/) and downloads prebuilt contract bytecode from the [`cosmos/solidity-ibc-eureka`](https://github.com/cosmos/solidity-ibc-eureka) release bundle. Dependencies are installed via `bun install` if not already present. Then the following runs inside a Foundry container on the Docker network (RPC target is `http://besu:8545` internally):
+The script uses the committed forge workspace at [`ibc/forge/`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/forge/) and downloads prebuilt contract bytecode from the [`cosmos/solidity-ibc-eureka`](https://github.com/cosmos/solidity-ibc-eureka) release bundle. Then the following runs inside a Foundry container:
 
 ```bash
 forge script scripts/MinimalDeploy.s.sol \
@@ -82,3 +84,9 @@ The demo uses the deployer address as both the AccessManager admin and the relay
 The demo deploys `IFTOwnable`, which uses `OwnableUpgradeable` for access control. For `AccessManager`-based access control, use `IFTAccessManaged` instead. For a fully custom implementation, extend [`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) and implement `_onlyAuthority()` with your own logic. The full interface is defined in [`IIFT.sol`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/interfaces/IIFT.sol).
 
 The ERC-20 name and symbol should match your Cosmos denom for consistency. The demo uses `"Test uift"` / `"UIFT"` to match the Cosmos-side `uift` denom.
+
+## Next steps
+
+With the contracts deployed, the next step generates the attestor signing key and starts the attestor services that will sign packet state for both chains.
+
+<!-- todo: link above -->

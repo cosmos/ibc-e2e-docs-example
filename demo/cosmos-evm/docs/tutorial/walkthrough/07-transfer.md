@@ -42,9 +42,13 @@ This triggers the relayer to pick up the packet immediately rather than waiting 
 
 The relayer fetches a proof from the Proof API, constructs a `RecvPacket` transaction, and submits it to Besu. The ICS-27 GMP contract on the EVM side decodes the packet payload and calls `iftMint` on the `IFTOwnable` contract, minting ERC-20 tokens to the recipient address.
 
-4. Balance snapshot
+4. Acknowledgement
 
-The script polls the Cosmos bank balance (packet commit) and the ERC-20 balance (relay delivery) in a loop and prints before/after snapshots when relay completes.
+Besu emits a `WriteAcknowledgement` event. The relayer picks it up, fetches a proof from the Proof API, and submits a `MsgAcknowledgement` to Cosmos. This completes the packet lifecycle on the source chain.
+
+5. Balance snapshot
+
+The script polls the Cosmos bank balance (packet commit) and the ERC-20 balance (relay delivery) and prints before/after snapshots when relay completes.
 
 ### EVM → Cosmos transfer
 
@@ -59,9 +63,7 @@ IFTOwnable.iftTransfer(
 )
 ```
 
-`iftTransfer` burns the ERC-20 tokens from the sender,
-uses the registered `CosmosIFTSendCallConstructor` to encode a `MsgIFTMint` GMP payload,
-and calls `ICS27GMP.sendCall` on `gmpport`.
+`iftTransfer` burns the ERC-20 tokens from the sender, uses the registered `CosmosIFTSendCallConstructor` to encode a `MsgIFTMint` GMP payload, and calls `ICS27GMP.sendCall` on `gmpport`.
 The packet is committed in the `ICS26Router`.
 
 2. Submit to relayer
@@ -71,6 +73,10 @@ The EVM transaction hash is posted to the relayer's Relay API to trigger immedia
 3. Relay delivery
 
 The relayer fetches an attestation proof from the Proof API, submits `RecvPacket` to the Cosmos chain, and the GMP module executes the embedded `MsgIFTMint`, minting `COSMOS_IFT_DENOM` tokens to the receiver.
+
+4. Acknowledgement
+
+The Cosmos chain emits a `WriteAcknowledgement` event. The relayer picks it up, fetches a proof from the Proof API, and calls `ackPacket` on the `ICS26Router` on the EVM chain. This clears the packet commitment on the EVM side and completes the packet lifecycle.
 
 ### Packet tracking
 
@@ -82,12 +88,9 @@ skip.relayer.RelayerApiService/Status { tx_hash, chain_id }
 
 The response includes the current transfer state. The script polls until the state reaches `TRANSFER_STATE_COMPLETE` or `TRANSFER_STATE_FAILED` and prints the full status JSON.
 
-Typical state progression for Cosmos → EVM:
-
-1. `TRANSFER_STATE_PENDING` — packet committed, not yet picked up
-2. `TRANSFER_STATE_COMPLETE` — acknowledgement submitted to Cosmos
-
 ### Timeout path
+
+This demo includes a script to simulate a timeout:
 
 1. The relayer container is paused (`docker compose pause relayer`).
 2. A transfer is submitted with a 60-second timeout.
@@ -112,8 +115,8 @@ The script samples the following without any additional setup:
 
 ## What you've built
 
-At this point you have a fully functioning IBC v2 bridge between a Cosmos chain and an EVM chain. Tokens burn on one side, a packet is committed, an attestor signs the state, the relayer delivers the proof, and tokens mint on the other side. 
+At this point you have a fully functioning IBC v2 bridge between a Cosmos chain and an EVM chain. Tokens burn on one side, a packet is committed, an attestor signs the state, the relayer delivers the proof, and tokens mint on the other side.
 
-You can view more commands for this demo in the [Quickstart](./quickstart.md)
+You can view more commands for this demo in the [Quickstart](../../quickstart.md)
 
 <!-- todo: fix link above-->

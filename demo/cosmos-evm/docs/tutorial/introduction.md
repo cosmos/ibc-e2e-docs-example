@@ -1,6 +1,6 @@
 # Cosmos<>EVM Interoperability Tutorial
 
-This tutorial walks you through setting up a live IBC connection between a Cosmos chain and an EVM (Besu) chain. This demo uses IFT token transfers to transfer tokens directly between the two chains. 
+This tutorial walks you through setting up a live IBC connection between a Cosmos chain and an EVM (Besu) chain. This demo uses IFT token transfers to transfer tokens directly between the two chains.
 
 By the end, you will have a fully wired IBC-connection: contracts deployed, attestors and relayer running, light clients created on both sides, and token transfers verified end-to-end.
 
@@ -8,7 +8,7 @@ You can find the tutorial demo repo here: [https://github.com/cosmos/ibc-e2e-doc
 
 The tutorial is built around a working demo that runs a [Cosmos sandbox chain](https://github.com/cosmos/sandbox-ledger) and a [Besu](https://github.com/hyperledger/besu) EVM node locally. You can use this demo as an example implementation for integrating Cosmos to EVM IBC functionality into your own chains.
 
-For conceptual background on how the system works before diving in, see the [architecture overview](./overview.md).
+For conceptual background on how the system works before diving in, see the [architecture overview](../overview.md).
 
 <!-- todo: update link above -->
 
@@ -26,7 +26,7 @@ The tutorial covers these steps in order:
 
 5. Create attestation light clients. Each chain needs a light client that can verify packets arriving from the other side. Both are initialized with the same attestor signer set.
 
-6. Wire the bridge. This links the two light clients as counterparties and registers the IFT token contract on each side so the bridge knows what to burn and mint.
+6. Wire the connection. This links the two light clients as counterparties and registers the IFT token contract on each side so the bridge knows what to burn and mint.
 
 7. Validate. Run token transfers in both directions and verify the final balances. The demo also covers packet tracking, the timeout and refund path, and how to read relayer and attestor logs.
 

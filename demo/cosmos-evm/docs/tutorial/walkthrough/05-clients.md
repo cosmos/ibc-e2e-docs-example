@@ -1,16 +1,18 @@
 # Step 5: Create Attestation Light Clients
 
-This step creates an attestation light client on each chain. Each client is initialized with the attestor address and a trusted snapshot of the counterparty chain's state. Once both clients exist, the two chains can verify each other's packets.
+This step creates an attestation light client on each chain. Each client is initialized with the attestor address and an initial trusted height and timestamp from the counterparty chain. Once both clients exist, the two chains can verify each other's packets.
 
-Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
+Run the following:
 
 ```bash
 ./setup.sh create-clients
 ```
 
+The logic for this command is in [`lib/ibc.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/ibc.sh)
+
 ## Attestation light client
 
-An attestation light client verifies IBC packets using ECDSA signatures from a registered set of off-chain attestors, rather than by validating counterparty block headers (as Tendermint light clients do). There are two implementations: [Go (cosmos/ibc-go)](https://github.com/cosmos/ibc-go/tree/main/modules/light-clients/attestations) for the Cosmos side and [Solidity (cosmos/solidity-ibc-eureka)](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol) for the EVM side.
+An attestation light client verifies IBC packets using ECDSA signatures from a registered set of off-chain attestors. There are two implementations: [Go (cosmos/ibc-go)](https://github.com/cosmos/ibc-go/tree/main/modules/light-clients/attestations) for the Cosmos side and [Solidity (cosmos/solidity-ibc-eureka)](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol) for the EVM side.
 
 Each client is initialized with a list of attestor Ethereum addresses and a quorum threshold. When a packet arrives with an attestation proof, the light client:
 
@@ -48,7 +50,7 @@ tx ibc client create client-state.json consensus-state.json
 
 The client state holds the client's configuration: which attestor addresses are trusted, the quorum threshold, the latest known height, and whether the client is frozen:
 
-**`client-state.json`** ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/client-state.json.tmpl)):
+- `client-state.json` ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/client-state.json.tmpl)):
 
 ```json
 {
@@ -60,9 +62,9 @@ The client state holds the client's configuration: which attestor addresses are 
 }
 ```
 
-The consensus state is a trusted snapshot of the counterparty chain at a specific height (for the attestation light client this is the block timestamp) which anchors proof verification:
+The consensus state records the block timestamp at the initial trusted height, which anchors proof verification:
 
-**`consensus-state.json`** ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/consensus-state.json.tmpl)):
+- `consensus-state.json` ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/consensus-state.json.tmpl)):
 
 ```json
 {
@@ -81,18 +83,6 @@ The script initializes it with:
 
 - The attestor's Ethereum address
 - The current Cosmos block height and timestamp as the initial trusted state
-
-Constructor:
-
-```
-AttestationLightClient(
-  address[] attestorAddresses,
-  uint8     minRequiredSigs,
-  uint64    initialHeight,
-  uint64    initialTimestampSeconds,
-  address   roleManager
-)
-```
 
 After deployment, the contract is registered with the `ICS26Router` on the EVM chain:
 
@@ -171,4 +161,4 @@ Setting `is_frozen: true` on the Cosmos client (or calling the equivalent on the
 
 <!-- todo: add link -->
 
-With both light clients created, the next step wires the bridge: registering each client as the counterparty of the other and linking the IFT token contracts on both chains.
+With both light clients created, the next step wires the connection: registering each client as the counterparty of the other and linking the IFT token contracts on both chains.

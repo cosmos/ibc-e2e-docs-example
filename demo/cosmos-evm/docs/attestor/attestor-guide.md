@@ -78,51 +78,38 @@ wallet_id = ""
 
 > **Note:** Only the fields relevant to the chosen `--signer-type` need to be present. The `[adapter]` fields that apply depend on the `--chain-type`.
 
-### EVM example (`attestor-evm.toml`)
+### EVM example
+
+This example is from the [`attestor-config.toml.tmpl`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/attestor-config.toml.tmpl) file of the IBC demo repo.
 
 ```toml
 [server]
-listen_addr = "0.0.0.0:8090"
-health_addr = "0.0.0.0:9000"
+listen_addr = "0.0.0.0:9101"
+health_addr = "0.0.0.0:9102"
 
 [adapter]
-url = "https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
-router_address = "0xff42b3db9f1040539a3741434e4b33b352fabd80"
-finality_offset = 64
+url = "<EVM_JSON_RPC_ENDPOINT>"
+router_address = "<ICS26_ROUTER_ADDR>"
+finality_offset = 0
 
 [signer]
-endpoint = "http://signer-service:9006"
-wallet_id = "my-eth-wallet"
+keystore_path = "/config/.ibc-attestor/ibc-attestor-keystore"
 ```
 
-### Cosmos example (`attestor-cosmos.toml`)
+### Cosmos example
+
+This example is from the [`attestor-cosmos-config.toml.tmpl`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/attestor-cosmos-config.toml.tmpl) file of the IBC demo repo.
 
 ```toml
 [server]
-listen_addr = "0.0.0.0:8090"
-health_addr = "0.0.0.0:9000"
+listen_addr = "0.0.0.0:9101"
+health_addr = "0.0.0.0:9102"
 
 [adapter]
-url = "https://rpc.cosmos-chain.example.com:443"
+url = "<COMETBFT_RPC_ENDPOINT>"
 
 [signer]
-endpoint = "http://signer-service:9006"
-wallet_id = "my-cosmos-wallet"
-```
-
-### Local signer example (`attestor-local.toml`)
-
-```toml
-[server]
-listen_addr = "0.0.0.0:8090"
-health_addr = "0.0.0.0:9000"
-
-[adapter]
-url = "https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY"
-router_address = "0xff42b3db9f1040539a3741434e4b33b352fabd80"
-
-[signer]
-keystore_path = "~/.ibc-attestor/ibc-attestor-keystore"
+keystore_path = "/config/.ibc-attestor/ibc-attestor-keystore"
 ```
 
 ## CLI Reference
