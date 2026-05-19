@@ -13,7 +13,7 @@ This page gets the demo running end-to-end with a single command. For a step-by-
 Clone the repository and navigate to the demo directory:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/cosmos/ibc-e2e-docs-example
 cd demo/cosmos-evm
 ```
 
@@ -73,6 +73,6 @@ Once complete, these containers are running:
 ./setup.sh help       # list all commands and configurable environment variables
 ```
 
-The next section of this tutorial walks you through each step of the demo, showing you how chains are set up, what each service does, and what to look for at each stage.
+The next sections of this tutorial walks you through each step of the demo, showing you how chains are set up, what each service does, and what to look for at each stage.
 
 <!-- todo: add list of walkthrough sections and links -->

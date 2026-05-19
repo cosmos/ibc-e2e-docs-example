@@ -75,7 +75,7 @@ Output: `COSMOS_CLIENT_ID` in the format `attestations-N`.
 
 ### 3. Create the EVM-side client
 
-The EVM-side client verifies Cosmos packets on the EVM chain. It is a Solidity contract (`AttestationLightClient`) deployed from prebuilt bytecode and registered with the `ICS26Router`.
+The EVM-side client verifies Cosmos packets on the EVM chain. It is a Solidity contract ([`AttestationLightClient`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol)) deployed from prebuilt bytecode and registered with the `ICS26Router`.
 
 The script initializes it with:
 
@@ -86,10 +86,10 @@ Constructor:
 
 ```
 AttestationLightClient(
-  address[] attestors,
-  uint8     quorum,
-  uint64    initHeight,
-  uint64    initTs,
+  address[] attestorAddresses,
+  uint8     minRequiredSigs,
+  uint64    initialHeight,
+  uint64    initialTimestampSeconds,
   address   roleManager
 )
 ```
@@ -139,11 +139,11 @@ docker compose restart proof-api
 
 | Argument | Description |
 | --- | --- |
-| `attestors` | List of registered attestor Ethereum addresses |
-| `quorum` | Minimum signatures required to accept a proof |
-| `initHeight` | Cosmos block height at time of deployment (initial trusted state) |
-| `initTs` | Cosmos block timestamp at `initHeight`, in Unix seconds |
-| `roleManager` | Address of an OpenZeppelin `AccessManager` for privileged operations. Use `address(0)` to grant all roles to the deployer (demo only) |
+| `attestorAddresses` | List of registered attestor Ethereum addresses |
+| `minRequiredSigs` | Minimum signatures required to accept a proof |
+| `initialHeight` | Cosmos block height at time of deployment (initial trusted state) |
+| `initialTimestampSeconds` | Cosmos block timestamp at `initialHeight`, in Unix seconds |
+| `roleManager` | Address that administers roles and is allowed to submit proofs. Use `address(0)` to allow anyone to submit proofs (demo only) |
 
 ## Applying this to your own setup
 
@@ -161,7 +161,7 @@ The attestor addresses are registered at client creation time. If you rotate the
 
 ### `roleManager` in production
 
-The demo passes `address(0)` as the `roleManager`, which grants all privileged roles to the deployer. You can also pass the address of an OpenZeppelin `AccessManager` to control who can freeze the client, rotate the attestor set, or update the quorum threshold.
+The demo passes `address(0)` as the `roleManager`, which allows anyone to submit proofs. You can also pass the address of an `AccessControl`-compatible admin to control who can submit proofs, freeze the client, rotate the attestor set, or update the quorum threshold.
 
 ### `is_frozen`
 

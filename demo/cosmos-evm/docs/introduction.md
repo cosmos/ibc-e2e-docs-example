@@ -30,6 +30,8 @@ The tutorial covers these steps in order:
 
 7. Validate. Run token transfers in both directions and verify the final balances. The demo also covers packet tracking, the timeout and refund path, and how to read relayer and attestor logs.
 
+<!-- todo: link the above to their respective pages -->
+
 ## About this example
 
 The demo is designed to run end-to-end with minimal setup. It should be used as reference-only. For ease of use and demonstration purposes, several things are simplified or preconfigured: keys, quorum thresholds, finality offsets, and access controls. For example, the EVM deployer uses the well-known Hardhat test key which should not be used with real funds. For a full production deployment, each of these should be reviewed and configured appropriately for your environment. 

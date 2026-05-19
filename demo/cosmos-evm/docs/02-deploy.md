@@ -48,15 +48,15 @@ Two more contracts are deployed in later steps:
 
 ### Resolving the IFT Contract Address
 
-After the Forge script completes, the script reads the broadcast artifacts (`broadcast/<script>/<chain-id>/run-latest.json`) to extract the deployed `TestIFT` proxy address and persists it as `IFT_CONTRACT_ADDR` in `ibc/state.env`. This address is used in the `wire` step to register the EVM contract as the counterparty for the Cosmos-side `uift` denom.
+After the Forge script completes, the script reads the broadcast artifacts (`broadcast/<script>/<chain-id>/run-latest.json`) to extract the deployed `IFTOwnable` proxy address and persists it as `IFT_CONTRACT_ADDR` in `ibc/state.env`. This address is used in the `wire` step to register the EVM contract as the counterparty for the Cosmos-side `uift` denom.
 
 ### Deployed Address Usage
 
 The three core addresses produced by this step are used throughout the rest of the setup:
 
 - `ICS26Router`: referenced by the attestor config (`router_address`), relayer config (`ics_26_router_address`), and proof API config (`ics26_address`)
-- `ICS27GMP`: passed as an initializer argument to `TestIFT` at deploy time
-- `TestIFT`: registered in the `wire` step as the EVM counterparty for the Cosmos `uift` denom
+- `ICS27GMP`: passed as an initializer argument to `IFTOwnable` at deploy time
+- `IFTOwnable`: registered in the `wire` step as the EVM counterparty for the Cosmos `uift` denom
 
 ## Applying this to your own chain
 
@@ -66,8 +66,8 @@ The order is fixed because each contract's initializer takes addresses from cont
 
 - `AccessManager` first: both `ICS26Router` and `ICS27GMP` take its address in `initialize`
 - `ICS27Account` before `ICS27GMP`: GMP's initializer takes the account implementation address
-- `addIBCApp` before `TestIFT`: packets cannot be routed to GMP until the port is registered
-- `TestIFT` last: initialized with the `ICS27GMP` address
+- `addIBCApp` before `IFTOwnable`: packets cannot be routed to GMP until the port is registered
+- `IFTOwnable` last: initialized with the `ICS27GMP` address
 
 ### Access control
 
@@ -79,6 +79,6 @@ The demo uses the deployer address as both the AccessManager admin and the relay
 
 ### IFT contract
 
-The demo deploys `TestIFT`, a minimal implementation used for testing. For production, extend [`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) and implement `_onlyAuthority()` with your access control logic. The full interface is defined in [`IIFT.sol`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/interfaces/IIFT.sol).
+The demo deploys `IFTOwnable`, which uses `OwnableUpgradeable` for access control. For `AccessManager`-based access control, use `IFTAccessManaged` instead. For a fully custom implementation, extend [`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) and implement `_onlyAuthority()` with your own logic. The full interface is defined in [`IIFT.sol`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/interfaces/IIFT.sol).
 
 The ERC-20 name and symbol should match your Cosmos denom for consistency. The demo uses `"Test uift"` / `"UIFT"` to match the Cosmos-side `uift` denom.

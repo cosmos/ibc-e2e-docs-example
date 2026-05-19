@@ -8,22 +8,16 @@ This page covers the components that make up a Cosmos to EVM IFT deployment and 
 
 ## System Architecture
 
-[todo: add image]
-
-Legend:
-- Blue = on-chain contracts (EVM)
-- Purple = IBC / SDK modules,
-- Orange = off-chain infrastructure
-- Dashed arrows = proofs / verification.
+<!-- todo: add image -->
 
 ## On-Chain components
 
 ### Cosmos Modules
 
-On the Cosmos side, IFT transfers rely on three modules: the core IBC stack, an attestation light client, and the IFT token transfer modules.
+On the Cosmos side, IFT transfers rely on three components: the core IBC stack, an attestation light client, and the IFT token transfer modules.
 
 - Core IBC Modules (`x/ibc`, `x/gmp`): the core IBC stack, including the ICS-26 Router, ICS-26 Application Callbacks, and ICS-27 GMP.
-- Attestation Light Client (`x/ibc` attestation LC): an IBC light client that verifies packets using quorum-signed ECDSA attestations from a trusted set of off-chain signers, rather than Tendermint header validation. [See below for more info](#attestation-light-client).
+- Attestation Light Client (`x/ibc` attestation LC): an IBC light client that verifies packets using quorum-signed ECDSA attestations from a trusted set of off-chain signers. [See below for more info](#attestation-light-client).
 - Token Factory + IFT (`x/tokenfactory`, `x/ift`): chain-native token management and the IFT bridge module. Handles core asset logic and is configured with the IBC stack to initiate outgoing and process incoming IBC packets.
 
 ### EVM Contracts
@@ -31,14 +25,14 @@ On the Cosmos side, IFT transfers rely on three modules: the core IBC stack, an 
 On the EVM side, the same components are mirrored as Solidity contracts from [cosmos/solidity-ibc-eureka](https://github.com/cosmos/solidity-ibc-eureka/tree/main/contracts), deployable to any EVM-compatible chain without modifications to the chain itself.
 
 - Core IBC Contracts (`ICS26Router`, `ICS27GMP`, `ICS27Account`): the core IBC contract stack, including the ICS-26 Router and ICS-27 GMP + Callbacks contracts.
-- Attestation Light Client (`AttestationLightClient`): the Solidity implementation of the same attestation-based light client, verifying packets using quorum-signed ECDSA attestations from the same trusted signer set. [See below for more info](#attestation-light-client).
-- Interchain Fungible Token ([`IFTBaseUpgradeable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTBaseUpgradeable.sol) / `IFTOwnable`): a set of interfaces for creating and managing fungible tokens that can be transferred across chains using ICS-27 GMP.
+- Attestation Light Client (`AttestationLightClient`): the Solidity implementation of the same attestation-based light client, verifying packets using quorum-signed ECDSA attestations from the a signer set. [See below for more info](#attestation-light-client).
+- Interchain Fungible Token ([`IFTOwnable`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/IFTOwnable.sol)): a set of interfaces for creating and managing fungible tokens that can be transferred across chains using ICS-27 GMP.
 
 ### IFT (Interchain Fungible Token)
 
-IFT is a cross-chain token standard for transfering tokens between chains. Instead of locking tokens in escrow on the source chain and minting a wrapped version on the destination (the ICS-20 model), IFT burns tokens on the source and mints the canonical token on the destination. Users always hold a real token rather than a wrapped one, and token issuers maintain control over total supply across chains.
+IFT is a cross-chain token standard for transferring tokens between chains. Instead of locking tokens in escrow on the source chain and minting a wrapped version on the destination (the ICS-20 model), IFT burns tokens on the source and mints the canonical token on the destination. Users always hold a real token rather than a wrapped one, and token issuers maintain control over total supply across chains.
 
-IFT contracts can be deployed across multiple chains, enabling direct token transfers between them without requiring intermediate routing or path dependencies. 
+IFT contracts can be deployed across multiple chains, enabling direct token transfers between them without requiring intermediate routing or path dependencies.
 
 On the Cosmos side, the IFT module wraps a token factory module. The `register-bridge` command links a token factory denom to a specific EVM IFT contract. On outbound transfers the module burns the tokens; on inbound packets it mints them.
 
@@ -50,21 +44,15 @@ GMP is the ICS-27 application protocol used to send arbitrary cross-chain messag
 
 When a GMP message arrives, the destination chain lazily creates a deterministic account derived from the sender address, source client ID, and a salt. That account then executes the payload on the target contract. In IFT transfers, GMP carries the `MsgIFTMint` instruction that tells the destination chain what to mint and to whom.
 
-The destination account address is derived by hashing the exact sender string, so the sender address must be EIP-55 checksummed.
-
 ### Attestation Light Client
 
-Unlike Tendermint light clients which store counterparty chain state, the attestation light client verifies source chain state on the destination chain using proofs from attestors. It is configured with a set of registered attestors and a quorum threshold, and verifies incoming IBC packets by recovering and validating signer addresses from the submitted signatures. Packets are accepted only when signatures from a minimum number of registered attestors are present (m-of-n).
-
-When a packet arrives, it recovers signer addresses from the submitted ECDSA signatures and accepts the packet only if a quorum of registered signers are present. There are two implementations: one in Go for the Cosmos side and one in Solidity for the EVM side. Both use the same verification logic and are initialized with the same signer set.
+Unlike Tendermint light clients which store counterparty chain state, the attestation light client verifies source chain state on the destination chain using proofs from attestors. It is configured with a set of registered attestors and a quorum threshold, and verifies incoming IBC packets by recovering and validating signer addresses from the submitted signatures. Packets are accepted only when signatures from a minimum number of registered attestors are present (m-of-n). There are two implementations: one in Go for the Cosmos side and one in Solidity for the EVM side. 
 
 ## Off-Chain
 
 ### Attestor Service
 
-The attestor is lightweight, stateless Rust service (cosmos/ibc-attestor) that watches a chain and produces ECDSA-signed attestations on demand via gRPC. When the Proof API asks for an attestation, the attestor queries the chain, signs the relevant state, and returns it. It does not store packet state itself.
-
-Two instances run per deployment, one watching the Cosmos chain and one watching the EVM chain. Both share the same keystore and sign with the same address, which is the address registered with the on-chain light clients on both sides.
+The attestor is lightweight, stateless Rust service (cosmos/ibc-attestor) that watches a chain and produces ECDSA-signed attestations on demand via gRPC. When the Proof API asks for an attestation, the attestor queries the chain, signs the relevant state, and returns it. Attestors are registered with their on-chain light clients on counterparty chains.
 
 ### Proof API
 
@@ -74,7 +62,7 @@ The Proof API is configured with two directional modules: `cosmos_to_eth` querie
 
 ### Relayer
 
-Cosmos to EVM connections use the production-ready IBC v2 relayer (cosmos/ibc-relayer) that submits `RecvPacket` and `MsgTimeout` transactions. When a relay is triggered, either by a user submitting a source transaction hash or by the relayer detecting a packet, it queries the Proof API for attestation data, constructs the relay transaction, and submits it to the destination chain. For packets that time out, it submits a `MsgTimeout` to the source chain to trigger a refund.
+Cosmos to EVM connections use the production-ready IBC v2 relayer (cosmos/ibc-relayer) that submits `RecvPacket` and `MsgTimeout` transactions. When a relay is triggered by a user submitting a source transaction hash, it queries the Proof API for attestation data, constructs the relay transaction, and submits it to the destination chain. It then relays the acknowledgement and proof back to the origin chain. For packets that time out, it submits a `MsgTimeout` to the source chain to trigger a refund.
 
 ## Example IBC Transfer Flows
 
@@ -113,8 +101,8 @@ Cosmos to EVM connections use the production-ready IBC v2 relayer (cosmos/ibc-re
         - Aggregates the signed attestations until the threshold is reached, 
         - Uses the aggregated signed attestations along with block data to generate the IBC RecvPacket data necessary to submit the transaction on chain, and
         - Responds back to the relayer with the relevant data.
-3. The relayer takes the IBC RecvPacket transaction data and submits it to the EVM destination chain.
-    - On the EVM destination chain, the core IBC modules parse the packet and execute core validation logic (sequencing, timeouts, etc), then routes it to the relevant light client module.
+3. The relayer takes the IBC RecvPacket transaction data and submits it to the Cosmos destination chain.
+    - On the Cosmos destination chain, the core IBC modules parse the packet and execute core validation logic (sequencing, timeouts, etc), then routes it to the relevant light client module.
     - The light client module validates the IBC packet according to the light client’s validation rules.
     - Once a packet is validated by the light client module, the IBC Core modules route the packet to the GMP application module.
     - The GMP application module parses/interprets the GMP payload, which encodes a call to the Token Factory module on the Cosmos destination chain to mint tokens via hooks.

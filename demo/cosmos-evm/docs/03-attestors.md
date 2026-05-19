@@ -36,8 +36,8 @@ The EVM config requires `ICS26_ROUTER_ADDR` from the deploy step.
 ### Starting the containers
 
 ```
-attestor        — ibc_attestor server --chain-type evm
-attestor-cosmos — ibc_attestor server --chain-type cosmos
+attestor        — ibc_attestor server --config /config/attestor-config.toml --chain-type evm --signer-type local
+attestor-cosmos — ibc_attestor server --config /config/attestor-cosmos-config.toml --chain-type cosmos --signer-type local
 ```
 
 Both containers mount the keystore from `ibc/local/.ibc-attestor/` and expose their gRPC server on port `9101`.

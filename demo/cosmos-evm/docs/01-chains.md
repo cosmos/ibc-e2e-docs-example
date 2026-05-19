@@ -42,6 +42,7 @@ The following are the IBC modules required for Cosmos-to-EVM IFT transfers that 
 The EVM chain is a single-validator [Hyperledger Besu](https://github.com/hyperledger/besu) node running QBFT consensus. Unlike the Cosmos side, the EVM chain requires no custom chain-level modules: the IBC stack is deployed as Solidity contracts on top of a standard EVM node.
 
 The demo uses:
+
 - Chain ID: `32382`
 - Block period: 2 seconds
 - Consensus: QBFT (single-validator, no peer discovery)
@@ -56,17 +57,18 @@ Besu is configured via [`evm/besu.toml`](https://github.com/cosmos/ibc-e2e-docs-
 The [`lib/chains.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/chains.sh) script runs inside the sandbox-ledger container to initialize the chain, then patches the genesis before starting:
 
 1. Creates the host config directories (`cosmos/local/config/`, `cosmos/local/keyring-test/`) so the bind mounts in `docker-compose.yml` resolve correctly.
-2. Copies the customized [`app.toml`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/app.toml) and [`config.toml`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/config.toml) from `cosmos/` into the config directory.
-3. Runs `sandboxd init` to generate the initial genesis and key files.
-4. Adds a `validator` key using `secp256k1` (not `eth_secp256k1` as the relayer requires standard Cosmos key derivation).
-5. Adds a `relayer` key and funds both accounts in genesis.
-6. Reads the CometBFT consensus pubkey from `priv_validator_key.json` and injects it into the POA validator set in genesis via [`patch-genesis.jq`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/patch-genesis.jq). POA requires at least one validator in genesis or it rejects on startup.
-7. Patches genesis denoms and sets the IFT module authority to the validator address.
+2. Runs `sandboxd init` to generate the initial genesis and key files.
+3. Adds a `validator` key using `secp256k1` (not `eth_secp256k1` as the relayer requires standard Cosmos key derivation).
+4. Adds a `relayer` key and funds it in genesis.
+5. Reads the CometBFT consensus pubkey from `priv_validator_key.json` and injects it into the POA validator set in genesis via [`patch-genesis.jq`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/patch-genesis.jq). POA requires at least one validator in genesis or it rejects on startup.
+6. Patches genesis denoms and sets the IFT module authority to the validator address.
+7. Copies the customized [`app.toml`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/app.toml) and [`config.toml`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/cosmos/config.toml) from `cosmos/` into the config directory, overwriting the defaults written by `init`.
 8. Starts the `cosmos` container.
 
 ### Besu initialization
 
 1. Starts the `besu` container with the pre-existing `evm/el-genesis.json` and `evm/key` files.
+
 2. Polls `http://localhost:8545` until the JSON-RPC endpoint is reachable.
 
 ### Readiness check
@@ -88,7 +90,7 @@ Besu (Ethereum EL)
 
 For a real integration, your chains are most likely already running. What matters is that the Cosmos chain has all the IBC modules listed in the [table above](#cosmos-sandbox-ledger) installed and wired.
 
-When wiring the keepers in `app.go`, the initialization order is fixed: `TokenFactoryKeeper` must be created before `GMPKeeper`, and both must exist before `IFTKeeper`, since the IFT keeper takes the other two as dependencies.
+When wiring the keepers in `app.go`, the initialization order is fixed: both `GMPKeeper` and `TokenFactoryKeeper` must be created before `IFTKeeper`, since the IFT keeper takes both as dependencies.
 
 The IBC v2 port routing is set in [`app/app.go`](https://github.com/cosmos/sandbox-ledger/blob/main/app/app.go):
 

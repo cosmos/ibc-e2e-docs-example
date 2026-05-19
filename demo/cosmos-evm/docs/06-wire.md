@@ -64,7 +64,7 @@ This address is baked into the `CosmosIFTSendCallConstructor` at deploy time.
 
 This contract encodes the `MsgIFTMint` message for EVM-to-Cosmos transfers. It is initialized with:
 
-- `typeUrl`: `/ibc.applications.prototypes.ift.v1.MsgIFTMint`
+- `bridgeReceiveTypeUrl`: `/ibc.applications.prototypes.ift.v1.MsgIFTMint`
 - `denom`: `COSMOS_IFT_DENOM`
 - `icaAddress`: the GMP account address computed above
 
@@ -81,7 +81,7 @@ IFTOwnable.registerIFTBridge(
 | Argument | Description |
 | --- | --- |
 | `client` | EVM client ID that routes Cosmos-to-EVM packets to this bridge |
-| `module` | Cosmos IFT module account address -- the authorized sender for Cosmos-to-EVM packets |
+| `module` | Cosmos IFT module account address — the authorized sender for Cosmos-to-EVM packets |
 | `ctor` | Address of the deployed `CosmosIFTSendCallConstructor` |
 
 ### 4. Finalize the relayer config
@@ -119,4 +119,4 @@ The GMP account address is deterministically derived from `(client_id, contract_
 
 ## Next steps
 
-With the bridge wired, the [next step](walkthrough-transfer.md) sends a live token transfer and validates the full packet relay flow.
+With the bridge wired, the [next step](07-ransfer.md) sends a live token transfer and validates the full packet relay flow.
