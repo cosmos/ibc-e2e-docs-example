@@ -115,7 +115,7 @@ committed skeleton at `ibc/forge/` (foundry.toml + package.json with
 just OpenZeppelin and forge-std).
 
 One contract is **not** in the deploy script: `AttestationLightClient`
-is deployed standalone in Phase 4E3 because its constructor needs
+is deployed standalone in Phase 4B6 (during `create-clients`) because its constructor needs
 runtime values (current Cosmos height/timestamp + attestor address).
 It's also loaded from `release-bytecode/AttestationLightClient.json`.
 
@@ -264,9 +264,9 @@ Each step is idempotent — safe to re-run if something fails.
 
 ./setup.sh deploy           # Step 1/5: prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
 ./setup.sh attestors        # Step 2/5: generate keystore + configs, start attestors
-./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations, start relayer + proof-api
-./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
-./setup.sh wire             # Step 5/5: register counterparties + IFT bridges + finalise relayer config
+./setup.sh create-clients   # Step 3/5: create attestation light clients on both chains
+./setup.sh relayer          # Step 4/5: copy keys, render configs (client IDs now known), run DB migrations, start relayer + proof-api
+./setup.sh wire             # Step 5/5: register counterparties + IFT bridges
 ```
 
 ### Demos

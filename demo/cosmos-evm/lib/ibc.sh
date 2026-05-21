@@ -963,6 +963,7 @@ setup_ibc() {
   run_phase "Phase 4C:  Resolve relayer wallet"           setup_relayer_key
   run_phase "Phase 4B5: Reconcile IBC client pair"        reconcile_ibc_client_pair
   run_phase "Phase 4B5: Create attestation IBC client"    create_ibc_clients
+  run_phase "Phase 4B6: Create EVM-side Cosmos client"    create_evm_ibc_client
   run_phase "Phase 4D:  Generate relayer config"          generate_relayer_config
   # Render config files for everything the relayer transitively pulls in
   # (proof-api → attestor + attestor-cosmos) BEFORE start_relayer. Otherwise
@@ -986,12 +987,6 @@ setup_ibc() {
   run_phase "Phase 4E1: Start attestor (EVM watcher)"     start_attestor
   run_phase "Phase 4E1a: Start attestor (Cosmos watcher)" start_attestor_cosmos
   run_phase "Phase 4E2: Start proof API"                  start_proof_api
-  run_phase "Phase 4E3: Create EVM-side Cosmos client"    create_evm_ibc_client
-
-  # Alloy HTTP provider may have cached state from before addClient — refresh.
-  log "Restarting proof-api to clear stale provider state..."
-  docker compose restart proof-api
-
   run_phase "Phase 4F:  Wait for attestation client"      wait_for_ibc_ready
   run_phase "Phase 4F1: Wait for Cosmos client on EVM"    wait_for_evm_client
   run_phase "Phase 4F2: Register counterparties"          register_counterparty
@@ -999,7 +994,6 @@ setup_ibc() {
   run_phase "Phase 4F3a: Register IFT bridge (evm side)"  register_evm_ift_bridge
   # IFT tokens are minted lazily in demo_cosmos_to_evm_transfer when the sender
   # doesn't have enough — no pre-mint at setup time.
-  run_phase "Phase 4F4: Finalise relayer config"          finalize_relayer_config
 
   run_phase "Phase 4G:  Run user-story demos"             demo_all
 
