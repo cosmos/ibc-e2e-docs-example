@@ -371,8 +371,8 @@ _cp_block() {
 
 # ─── Phase 4D ────────────────────────────────────────────────────────────────
 # Export the cosmos relayer privkey, render keys.json + config.yml from
-# templates. Run once early with empty client maps; finalized later by
-# finalize_relayer_config once both client IDs are known.
+# templates. Both client IDs are present in state at this point (create-clients
+# always runs before relayer), so counterparty_chains is rendered complete.
 generate_relayer_config() {
   log "Generating relayer config → ibc/local/config.yml"
   mkdir -p "$IBC_DIR/local"
@@ -515,7 +515,7 @@ start_proof_api() {
   docker compose up -d proof-api
 }
 
-# ─── Phase 4E3 ───────────────────────────────────────────────────────────────
+# ─── Phase 4B6 ───────────────────────────────────────────────────────────────
 # Read attestor address + Cosmos head height/timestamp, deploy
 # AttestationLightClient(attestors, quorum=1, initHeight, initTs,
 # roleManager=0x0) via `cast --create`, then call ICS26Router.addClient to
@@ -928,16 +928,6 @@ register_evm_ift_bridge() {
   state_set IFT_CTOR_ADDR "$ctor_addr"
   state_set COSMOS_IFT_MODULE_ADDR "$cosmos_ift_module"
   log "EVM IFT bridge registered"
-}
-
-# ─── Phase 4F4 ───────────────────────────────────────────────────────────────
-# Re-render config.yml now that both client IDs are known and restart relayer.
-finalize_relayer_config() {
-  log "Finalising relayer config with counterparty client mappings..."
-  generate_relayer_config
-  log "Restarting relayer to pick up updated config..."
-  docker compose restart relayer
-  log "Relayer restarted"
 }
 
 # ─── Phase 4 driver ──────────────────────────────────────────────────────────
