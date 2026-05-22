@@ -955,6 +955,8 @@ setup_ibc() {
   run_phase "Phase 4B5: Create attestation IBC client"    create_ibc_clients
   run_phase "Phase 4B6: Create EVM-side Cosmos client"    create_evm_ibc_client
   run_phase "Phase 4B7: Register Cosmos counterparty"     register_counterparty
+  run_phase "Phase 4F3:  Register IFT bridges (cosmos)"   register_ift_bridges
+  run_phase "Phase 4F3a: Register IFT bridge (evm side)"  register_evm_ift_bridge
   run_phase "Phase 4D:  Generate relayer config"          generate_relayer_config
   # Render config files for everything the relayer transitively pulls in
   # (proof-api → attestor + attestor-cosmos) BEFORE start_relayer. Otherwise
@@ -980,9 +982,6 @@ setup_ibc() {
   run_phase "Phase 4E2: Start proof API"                  start_proof_api
   run_phase "Phase 4F:  Wait for attestation client"      wait_for_ibc_ready
   run_phase "Phase 4F1: Wait for Cosmos client on EVM"    wait_for_evm_client
-
-  run_phase "Phase 4F3:  Register IFT bridges (cosmos)"   register_ift_bridges
-  run_phase "Phase 4F3a: Register IFT bridge (evm side)"  register_evm_ift_bridge
   # IFT tokens are minted lazily in demo_cosmos_to_evm_transfer when the sender
   # doesn't have enough — no pre-mint at setup time.
 
