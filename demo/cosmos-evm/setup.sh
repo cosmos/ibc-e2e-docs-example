@@ -169,6 +169,7 @@ cmd_create_clients() {
   run_phase "create-clients: Create EVM-side Cosmos client"     create_evm_ibc_client
   run_phase "create-clients: Wait for attestation client"       wait_for_ibc_ready
   run_phase "create-clients: Wait for Cosmos client on EVM"     wait_for_evm_client
+  run_phase "create-clients: Register Cosmos counterparty"      register_counterparty
   log "Light clients created. Run './setup.sh relayer' next."
 }
 
@@ -259,8 +260,6 @@ cmd_chains() {
 cmd_ibc() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
   setup_ibc
-  # register_counterparty already runs inside setup_ibc (Phase 4F2); no
-  # need to call it again here.
 }
 
 cmd_demo() {
