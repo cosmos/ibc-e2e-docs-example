@@ -48,9 +48,10 @@ running CometBFT for consensus.
 
 Tokens that exist on this chain:
 - `uatom` — staking + gas denom (the validator stakes it, you pay fees in it)
-- `uift` — created at runtime by the **tokenfactory** module under the
-  validator as creator. Stored as a bare subdenom (just `uift`), not the
-  full `factory/<creator>/uift` form some other chains use.
+- `factory/<creator>/uift` — created at runtime by the **tokenfactory** module
+  under the validator as creator. The full tokenfactory denom
+  (`factory/<validator-address>/uift`) is used everywhere — in transfers,
+  bridge registration, and balance queries.
 
 The cosmos service has its **whole `/data/config/` directory bind-mounted
 from `./cosmos/local/config/`** on the host, so all the genesis/keys/etc
@@ -115,7 +116,7 @@ committed skeleton at `ibc/forge/` (foundry.toml + package.json with
 just OpenZeppelin and forge-std).
 
 One contract is **not** in the deploy script: `AttestationLightClient`
-is deployed standalone in Phase 4E3 because its constructor needs
+is deployed standalone in Phase 4B6 (during `create-clients`) because its constructor needs
 runtime values (current Cosmos height/timestamp + attestor address).
 It's also loaded from `release-bytecode/AttestationLightClient.json`.
 
@@ -221,7 +222,7 @@ clients.
 5. cosmos1...recipient now holds 1000000 uift on Cosmos.
 ```
 
-The demo's status tracker polls for ≤120 s on Cosmos→EVM and ≤300 s
+The demo's status tracker polls for ≤120 s on Cosmos→EVM and ≤180 s
 on EVM→Cosmos.
 
 The two key addresses to keep separate in the EVM→Cosmos direction
@@ -263,10 +264,10 @@ Each step is idempotent — safe to re-run if something fails.
 ./setup.sh chains           # 1. start Cosmos + Besu
 
 ./setup.sh deploy           # Step 1/5: prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
-./setup.sh attestors        # Step 2/5: generate keystore + configs, start attestors
-./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations, start relayer + proof-api
-./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
-./setup.sh wire             # Step 5/5: register counterparties + IFT bridges + finalise relayer config
+./setup.sh create-clients   # Step 2/5: create attestation light clients on both chains + register counterparties
+./setup.sh wire             # Step 3/5: register IFT bridges
+./setup.sh attestors        # Step 4/5: generate keystore + configs, start attestors
+./setup.sh relayer          # Step 5/5: copy keys, render configs (client IDs now known), run DB migrations, start relayer + proof-api
 ```
 
 ### Demos
@@ -337,7 +338,7 @@ terminal while the demo polls:
 
 ```bash
 # Cosmos (REST → JSON object {denom, amount}):
-curl -s 'http://localhost:1317/cosmos/bank/v1beta1/balances/<addr>/by_denom?denom=uift' | jq .balance
+curl -s 'http://localhost:1317/cosmos/bank/v1beta1/balances/<addr>/by_denom?denom=factory%2F<creator>%2Fuift' | jq .balance
 
 # EVM (eth_call → hex result, piped through printf for decimal):
 curl -s -X POST http://localhost:8545 -H 'Content-Type: application/json' \

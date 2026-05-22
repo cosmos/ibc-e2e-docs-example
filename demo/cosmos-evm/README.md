@@ -463,9 +463,9 @@ All commands are idempotent — re-running a step skips already-completed work.
 
 ./setup.sh deploy           # prepare forge workspace + fetch release bytecode + deploy IBC/IFT contracts on Besu
 ./setup.sh attestors        # generate keystore + configs, start attestor-evm and attestor-cosmos
-./setup.sh relayer          # copy keys, render configs, run DB migrations, start relayer + proof-api
 ./setup.sh create-clients   # create attestation light clients on both chains
-./setup.sh wire             # register counterparties + IFT bridges + finalise relayer config
+./setup.sh relayer          # copy keys, render configs (client IDs now known), run DB migrations, start relayer + proof-api
+./setup.sh wire             # register counterparties + IFT bridges
 
 ./setup.sh transfer         # cosmos↔evm IFT transfers (both directions)
 ./setup.sh demo cosmos-evm  # Cosmos → EVM IFT transfer
@@ -511,8 +511,8 @@ The table maps each internal phase to the `setup.sh` step command that runs it.
 | 2 | `start_services` | `chains` | `docker compose up -d cosmos` (Besu already running) |
 | 3 | `wait_for_services` | `chains` | Poll cosmos status + besu `eth_blockNumber` |
 | 4A0 | `prepare_forge_workspace` | `deploy` | Validate the committed forge skeleton at `$SOLIDITY_IBC_DIR` (default `ibc/forge/`), create runtime subdirs, run `bun install` to fetch OpenZeppelin + forge-std into `node_modules/`. Migrates stale `SOLIDITY_IBC_DIR` values from earlier source-tree layouts. |
-| 4A0b | `fetch_release_bytecode` | `deploy` | Download the `solidity-contracts-$SOLIDITY_RELEASE_TAG.tar.gz` release tarball from `cosmos/solidity-ibc-eureka` and extract `bytecode/*.json` into `ibc/forge/release-bytecode/`. These are consumed at runtime by `MinimalDeploy.s.sol` (`vm.getCode`), and standalone by Phase 4E3 (`AttestationLightClient`) and Phase 4F3a (`CosmosIFTSendCallConstructor`). |
-| 4A | `deploy_ibc_contracts` | `deploy` | Runs `forge script "$DEPLOY_SCRIPT"` (default `scripts/MinimalDeploy.s.sol`). The script deploys `ICS26Router`, `ICS27GMP`, `ICS27Account`, and `IFTOwnable` proxies — bytecode loaded from `release-bytecode/*.json` via `vm.getCode` — and registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if the router already has bytecode on-chain. (`AttestationLightClient` is NOT deployed here — see Phase 4E3.) |
+| 4A0b | `fetch_release_bytecode` | `deploy` | Download the `solidity-contracts-$SOLIDITY_RELEASE_TAG.tar.gz` release tarball from `cosmos/solidity-ibc-eureka` and extract `bytecode/*.json` into `ibc/forge/release-bytecode/`. These are consumed at runtime by `MinimalDeploy.s.sol` (`vm.getCode`), and standalone by Phase 4B6 (`AttestationLightClient`) and Phase 4F3a (`CosmosIFTSendCallConstructor`). |
+| 4A | `deploy_ibc_contracts` | `deploy` | Runs `forge script "$DEPLOY_SCRIPT"` (default `scripts/MinimalDeploy.s.sol`). The script deploys `ICS26Router`, `ICS27GMP`, `ICS27Account`, and `IFTOwnable` proxies — bytecode loaded from `release-bytecode/*.json` via `vm.getCode` — and registers `ICS26Router.addIBCApp("gmpport", ICS27GMP)`. Skips on re-run if the router already has bytecode on-chain. (`AttestationLightClient` is NOT deployed here — see Phase 4B6.) |
 | 4A1 | `deploy_ift_contracts` | `deploy` | Parse `ift` label from forge return → `IFT_CONTRACT_ADDR` (`IFTOwnable` proxy) |
 | 4E1 | `_ensure_attestor_keystore` | `attestors` | Generate Web3 v3 JSON keystore for the attestor signing key (idempotent) |
 | 4D1a | `generate_attestor_config` | `attestors` | Render `attestor-config.toml` (EVM watcher config) |
@@ -520,20 +520,19 @@ The table maps each internal phase to the `setup.sh` step command that runs it.
 | 4E1 | `start_attestor` | `attestors` | `docker compose up -d attestor` (EVM watcher) |
 | 4E1a | `start_attestor_cosmos` | `attestors` | `docker compose up -d attestor-cosmos` (Cosmos watcher, same keystore) |
 | 4C | `setup_relayer_key` | `relayer` | Resolve relayer bech32 address; copy Cosmos keyring into relayer-data volume |
-| 4D | `generate_relayer_config` | `relayer` | Render `config.yml` + `keys.json` from templates (initial pass with empty client IDs; finalized in Phase 4F4) |
+| 4D | `generate_relayer_config` | `relayer` | Render `config.yml` + `keys.json` from templates. Both client IDs are in `state.env` at this point — `create-clients` always runs before `relayer` in both the full and step-by-step flows. |
 | 4D1 | `generate_proof_api_config` | `relayer` | Render `relayer.json` — must exist before `docker compose up relayer` to avoid compose creating a directory at the bind-mount path |
 | 4E0 | `_wait_for_postgres` + `run_db_migrations` | `relayer` | `docker compose up -d postgres`, poll `pg_isready`, then `migrate up` against the schema from `cosmos/ibc-relayer@<OPERATOR_IMAGE tag>` |
 | 4E | `start_relayer` | `relayer` | `docker compose up -d relayer` |
 | 4E2 | `start_proof_api` | `relayer` | `docker compose up -d proof-api` (attested mode in both directions) |
 | 4B5a | `reconcile_ibc_client_pair` | `create-clients` | Verify persisted `COSMOS_CLIENT_ID` ↔ `EVM_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |
 | 4B5b | `create_ibc_clients` | `create-clients` | Submit `MsgCreateClient` with attestation ClientState (rendered to `cosmos/local/ibc_*_state.json`); poll for commit via REST indexer |
-| 4E3 | `create_evm_ibc_client` | `create-clients` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)` |
+| 4B6 | `create_evm_ibc_client` | `create-clients` | Read attestor address from keystore + Cosmos head height/timestamp, deploy `AttestationLightClient(attestors, quorum=1, initHeight, initTs, roleManager=0x0)` via `cast --create`, register with `ICS26Router.addClient("client-N", …)` |
 | 4F | `wait_for_ibc_ready` | `create-clients` | Poll Cosmos REST `/ibc/core/client/v1/client_states` for any `attestations-*` client |
 | 4F1 | `wait_for_evm_client` | `create-clients` | Poll `ICS26Router.getNextClientSeq()` until > 0; derives `client-$((next_seq - 1))` |
 | 4F2 | `register_counterparty` | `wire` | Cosmos-side `add-counterparty attestations-N client-N` |
 | 4F3 | `register_ift_bridges` | `wire` | Create tokenfactory subdenom `uift`, then `tx ift register-bridge uift attestations-N <IFTOwnable-checksummed> evm` (EIP-55 checksum is critical — sandbox x/ift does plain string compare against ICS27GMP's checksummed sender). Rewrites `DEMO_TRANSFER_AMOUNT` to `<N>uift`. |
 | 4F3a | `register_evm_ift_bridge` | `wire` | (1) `sandboxd query gmp get-address <client> <IFTOwnable-checksummed> ""` → ICA bech32 (sender MUST be EIP-55-cased). (2) `sandboxd query auth module-account ift` → Cosmos IFT module account. (3) Deploy `CosmosIFTSendCallConstructor(type_url, denom, ica)` (bytecode from `release-bytecode/`). (4) `IFTOwnable.registerIFTBridge(client-N, cosmos_ift_module, ctor)`. |
-| 4F4 | `finalize_relayer_config` | `wire` | Re-render `config.yml` now that both client IDs are known; restart relayer |
 | 4G | `demo_all` | `demo` | Runs the five user-story demos. Each transfer demo prints copy-pasteable curl commands before broadcasting. Direction-aware polling: cosmos→evm caps at 120s, evm→cosmos caps at 300s. |
 
 All on-chain Cosmos txs run through `cosmos_tx_and_wait` (in `lib/common.sh`)

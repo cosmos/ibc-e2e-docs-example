@@ -27,12 +27,11 @@ cd demo/cosmos-evm
 
 # Or run the IBC steps individually (idempotent — safe to re-run)
 ./setup.sh deploy           # Step 1/5: fetch source + deploy IBC/IFT contracts on Besu
-./setup.sh attestors        # Step 2/5: generate keystores/configs + start attestor services
-./setup.sh relayer          # Step 3/5: copy keys, render configs, run DB migrations,
+./setup.sh create-clients   # Step 2/5: create attestation light clients on both chains
+./setup.sh wire             # Step 3/5: register IFT bridges
+./setup.sh attestors        # Step 4/5: generate keystores/configs + start attestor services
+./setup.sh relayer          # Step 5/5: copy keys, render configs, run DB migrations,
                             #           start relayer + proof-api
-./setup.sh create-clients   # Step 4/5: create attestation light clients on both chains
-./setup.sh wire             # Step 5/5: register counterparties + IFT bridges +
-                            #           finalise relayer config
 
 # Demos
 ./setup.sh transfer         # cosmos↔evm IFT transfers (alias for `demo transfer`)
