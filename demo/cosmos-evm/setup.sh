@@ -9,10 +9,10 @@
 #
 # Step-by-step IBC commands (run in order on already-running chains):
 #   ./setup.sh deploy        — fetch source + deploy IBC/IFT contracts on Besu
-#   ./setup.sh attestors     — generate keystores/configs + start attestor services
 #   ./setup.sh create-clients — create attestation light clients on both chains
+#   ./setup.sh wire          — register IFT bridges
+#   ./setup.sh attestors     — generate keystores/configs + start attestor services
 #   ./setup.sh relayer       — copy keys, render configs (with client IDs now known), start relayer + proof-api
-#   ./setup.sh wire          — register counterparties + IFT bridges
 #   ./setup.sh transfer      — run cosmos↔evm IFT transfers (alias for `demo transfer`)
 #   ./setup.sh demo [sub]    — run user-story demos
 #                              (transfer | cosmos-evm | evm-cosmos | track | failure | observe | all)
@@ -145,10 +145,10 @@ cmd_deploy() {
   run_phase "deploy: Fetch release bytecode bundle"     fetch_release_bytecode
   run_phase "deploy: Deploy IBC contracts on Besu"      deploy_ibc_contracts
   run_phase "deploy: Resolve IFT ERC20 address"         deploy_ift_contracts
-  log "Deploy complete. Run './setup.sh attestors' next."
+  log "Deploy complete. Run './setup.sh create-clients' next."
 }
 
-# Step 2 of 5: generate keystores/configs + start attestor services.
+# Step 4 of 5: generate keystores/configs + start attestor services.
 cmd_attestors() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
   run_phase "attestors: Ensure attestor keystore"              _ensure_attestor_keystore
@@ -156,12 +156,12 @@ cmd_attestors() {
   run_phase "attestors: Generate Cosmos attestor config"       generate_attestor_cosmos_config
   run_phase "attestors: Start EVM-watcher attestor"            start_attestor
   run_phase "attestors: Start Cosmos-watcher attestor"         start_attestor_cosmos
-  log "Attestors running. Run './setup.sh create-clients' next."
+  log "Attestors running. Run './setup.sh relayer' next."
 }
 
-# Step 3 of 5: create attestation light clients on both chains.
-# Runs before relayer so that generate_relayer_config (in cmd_relayer) has
-# both client IDs available and can render the config complete in one pass.
+# Step 2 of 5: create attestation light clients on both chains and register counterparties.
+# Runs before wire so that both client IDs are in state.env when IFT bridges are registered,
+# and before relayer so that generate_relayer_config has both IDs and renders complete in one pass.
 cmd_create_clients() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
   run_phase "create-clients: Reconcile IBC client pair"         reconcile_ibc_client_pair
@@ -169,10 +169,11 @@ cmd_create_clients() {
   run_phase "create-clients: Create EVM-side Cosmos client"     create_evm_ibc_client
   run_phase "create-clients: Wait for attestation client"       wait_for_ibc_ready
   run_phase "create-clients: Wait for Cosmos client on EVM"     wait_for_evm_client
-  log "Light clients created. Run './setup.sh relayer' next."
+  run_phase "create-clients: Register Cosmos counterparty"      register_counterparty
+  log "Light clients created. Run './setup.sh wire' next."
 }
 
-# Step 4 of 5: copy keys, render configs, run DB migrations, start relayer + proof-api.
+# Step 5 of 5: copy keys, render configs, run DB migrations, start relayer + proof-api.
 # Both client IDs are in state.env at this point, so generate_relayer_config
 # renders the counterparty_chains mappings correctly on the first pass.
 cmd_relayer() {
@@ -186,16 +187,15 @@ cmd_relayer() {
   run_phase "relayer: Run DB migrations"            run_db_migrations
   run_phase "relayer: Start relayer"                start_relayer
   run_phase "relayer: Start proof API"              start_proof_api
-  log "Relayer + proof-api running. Run './setup.sh wire' next."
+  log "Relayer + proof-api running. Run './setup.sh demo cosmos-evm' or './setup.sh demo evm-cosmos'."
 }
 
-# Step 5 of 5: register counterparties + IFT bridges.
+# Step 3 of 5: register IFT bridges on both chains.
 cmd_wire() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
-  run_phase "wire: Register counterparties"          register_counterparty
   run_phase "wire: Register IFT bridges (Cosmos)"    register_ift_bridges
   run_phase "wire: Register IFT bridge (EVM)"        register_evm_ift_bridge
-  log "IBC wiring complete. Run './setup.sh demo cosmos-evm' or './setup.sh demo evm-cosmos'."
+  log "IFT bridges registered. Run './setup.sh attestors' next."
 }
 
 cmd_help() {
@@ -215,11 +215,11 @@ TOP-LEVEL:
 
 IBC STEP-BY-STEP (run in order on already-running chains):
   deploy            Step 1/5: fetch source + deploy IBC/IFT contracts on Besu
-  attestors         Step 2/5: generate keystores/configs + start attestor services
-  create-clients    Step 3/5: create attestation light clients on both chains
-  relayer           Step 4/5: copy keys, render configs (client IDs now known),
+  create-clients    Step 2/5: create attestation light clients on both chains + register counterparties
+  wire              Step 3/5: register IFT bridges
+  attestors         Step 4/5: generate keystores/configs + start attestor services
+  relayer           Step 5/5: copy keys, render configs (client IDs now known),
                               run DB migrations, start relayer + proof-api
-  wire              Step 5/5: register counterparties + IFT bridges
 
 DEMOS:
   transfer          Run cosmos↔evm IFT transfers (alias for `demo transfer`)
@@ -259,8 +259,6 @@ cmd_chains() {
 cmd_ibc() {
   [[ -f "$IBC_STATE_FILE" ]] && source "$IBC_STATE_FILE" 2>/dev/null || true
   setup_ibc
-  # register_counterparty already runs inside setup_ibc (Phase 4F2); no
-  # need to call it again here.
 }
 
 cmd_demo() {
