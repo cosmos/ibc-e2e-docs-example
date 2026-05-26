@@ -1,0 +1,241 @@
+# Step 5: Configure and Start the Relayer and Proof API
+
+This step starts two services: the relayer ([cosmos/ibc-relayer](https://github.com/cosmos/ibc-relayer)) and the Proof API. Both need configs which are rendered from templates in this demo. The relayer also needs a funded signing key on both chains and a Postgres database for packet state.
+
+Run the following:
+
+```bash
+./setup.sh relayer
+```
+
+The logic for this command is in [`lib/ibc.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/ibc.sh)
+
+## Relayer
+
+The relayer delivers IBC packets between chains. For each packet, it submits a `RecvPacket` transaction to the destination chain to deliver it, or a `MsgTimeout` transaction to the source chain if the packet expires before delivery. It is request-driven: a client submits a source transaction hash, the relayer identifies the packets created by that transaction by reading IBC events from the chain, queries the Proof API for attestation proofs, and submits the relay transaction.
+
+The relayer has three components: a gRPC API server (used to trigger relays and track packet status), a Postgres database (packet state persistence), and a core relay dispatcher (monitors the database and processes relay jobs).
+
+## Proof API
+
+The Proof API is a stateless gRPC transaction generation service. The relayer calls it with a source transaction hash and the Proof API:
+
+1. Queries the source chain for that transaction and parses its IBC events
+2. Collects attestor signatures and verifies the quorum threshold is met
+3. Builds the full IBC message (`RecvPacket`, `AckPacket`, `Timeout`) with the proof embedded
+4. Returns an unsigned transaction payload to the relayer
+
+The relayer then signs and submits that transaction to the destination chain.
+
+The Proof API in this demo is configured with two directional modules: `cosmos_to_eth` and `eth_to_cosmos`. Each module queries the attestor watching its source chain.
+
+## What the relayer script does
+
+1. Resolve the relayer wallet: reads the relayer's bech32 address from the Cosmos keyring. This address is used in the Proof API config so the proof API can scope proof queries to this signer.
+2. Render the relayer config: exports the Cosmos private key and renders `keys.json` and `config.yml` from templates.
+3. Render the Proof API config: renders `relayer.json` from its template.
+4. Start Postgres and run migrations: waits for the database to be ready, then runs schema migrations.
+5. Start the relayer and Proof API.
+
+## Relayer key setup
+
+The relayer signs transactions on both chains and needs funded accounts on each.
+
+In the demo, the relayer reuses the Cosmos validator key.
+
+For a production deployment, you'll need to create a dedicated relayer key on each chain and fund it with enough gas to cover relay transactions:
+
+- **Cosmos side**: the relayer submits `MsgRecvPacket`, `MsgAcknowledgement`, and `MsgTimeout` transactions. Fund the account with the chain's fee denom.
+- **EVM side**: the relayer calls `recvPacket`, `ackPacket`, and `timeoutPacket` on the `ICS26Router` contract. Fund the account with the chain's native token (ETH or equivalent).
+
+## Configuration
+
+### Relayer
+
+The relayer config is rendered from [`ibc/relayer-config.yml.tmpl`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/relayer-config.yml.tmpl). The signing keys file is rendered from [`ibc/relayer-keys.json.tmpl`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/relayer-keys.json.tmpl). For EVM chains the key is a hex-encoded ECDSA private key; for Cosmos chains it is a hex-encoded secp256k1 private key.
+
+Below is an example of the relayer config for this demo:
+
+```yaml
+postgres:
+  hostname: postgres
+  port: "5432"
+  database: relayer
+
+signing:
+  keys_path: "/home/nonroot/config/local/keys.json"
+
+relayer_api:
+  address: "0.0.0.0:3000"
+
+metrics:
+  prometheus_address: "0.0.0.0:9100"
+
+ibcv2_proof_api:
+  grpc_address: "proof-api:9090"
+  grpc_tls_enabled: false
+
+chains:
+  cosmos:
+    chain_name: cosmos
+    chain_id: "cosmos-1"
+    type: cosmos
+    environment: testnet
+    cosmos:
+      rpc: "http://cosmos:26657"
+      grpc: "cosmos:9090"
+      address_prefix: "cosmos"
+      ibcv2_tx_fee_denom: "uatom"
+      ibcv2_tx_fee_amount: 20000
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      counterparty_chains:
+        attestations-0: "32382"
+
+  besu:
+    chain_name: besu
+    chain_id: "32382"
+    type: evm
+    environment: testnet
+    evm:
+      rpc: "http://besu:8545"
+      contracts:
+        ics_26_router_address: "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0"
+        ics_20_transfer_address: "0x0000000000000000000000000000000000000000"
+    supported_bridges:
+      - ibcv2
+    ibcv2:
+      finality_offset: 0
+      counterparty_chains:
+        client-0: "cosmos-1"
+```
+
+### Proof API
+
+The Proof API config is rendered from [`ibc/proof-api.json.tmpl`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/proof-api.json.tmpl). Each entry in `modules` is a directional routing unit that handles one transfer direction and knows which attestor to query for that direction's source chain. The `cosmos_to_eth` module queries the Cosmos attestor for Cosmos state; `eth_to_cosmos` queries the EVM attestor for EVM state.
+
+Below is an example of the Proof API config for this demo:
+
+```json
+{
+  "server": {"log_level": "info", "address": "0.0.0.0", "port": 9090},
+  "modules": [
+    {
+      "name": "cosmos_to_eth",
+      "src_chain": "cosmos-1",
+      "dst_chain": "32382",
+      "config": {
+        "tm_rpc_url": "http://cosmos:26657",
+        "ics26_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "eth_rpc_url": "http://besu:8545",
+        "signer_address": "cosmos1zj8jljx8rwyhfp36cmp0u5jqa98af8ehnv8463",
+        "mode": {"attested": {
+          "attestor": {
+            "quorum_threshold": 1,
+            "attestor_endpoints": ["http://attestor-cosmos:9101"],
+            "attestor_query_timeout_ms": 10000
+          }
+        }}
+      }
+    },
+    {
+      "name": "eth_to_cosmos",
+      "src_chain": "32382",
+      "dst_chain": "cosmos-1",
+      "config": {
+        "tm_rpc_url": "http://cosmos:26657",
+        "ics26_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+        "eth_rpc_url": "http://besu:8545",
+        "signer_address": "cosmos1zj8jljx8rwyhfp36cmp0u5jqa98af8ehnv8463",
+        "mode": {"attested": {
+          "attestor": {
+            "quorum_threshold": 1,
+            "attestor_endpoints": ["http://attestor:9101"],
+            "attestor_query_timeout_ms": 10000
+          }
+        }}
+      }
+    }
+  ]
+}
+```
+
+## Applying this to your own setup
+
+### Relayer key funding
+
+The relayer needs sufficient gas on both chains to submit transactions continuously. The relayer exposes gas balance metrics and supports configurable alert thresholds (`signer_gas_alert_thresholds`) per chain in `config.yml`:
+
+```yaml
+chains:
+  cosmos:
+    # ...
+    signer_gas_alert_thresholds:
+      ibcv2:
+        warning_threshold: "5000000"    # uatom
+        critical_threshold: "1000000"
+  besu:
+    # ...
+    signer_gas_alert_thresholds:
+      ibcv2:
+        warning_threshold: "1000000000000000000"   # 1 ETH
+        critical_threshold: "500000000000000000"   # 0.5 ETH
+```
+
+### Signing
+
+The demo uses local signing via `keys.json`. For production, the relayer supports a remote gRPC signing service that keeps private keys isolated from the relayer process. Replace `keys_path` in the `signing` block of `config.yml` with:
+
+```yaml
+signing:
+  grpc_address: "localhost:50052"
+  cosmos_wallet_key: "my-cosmos-wallet"
+  evm_wallet_key: "my-evm-wallet"
+```
+
+`grpc_address` takes precedence over `keys_path` if both are set. See the [ibc-relayer README](https://github.com/cosmos/ibc-relayer) for the signer service proto interface.
+
+### Finality offset
+
+`finality_offset` controls when the relayer considers a packet commitment on an EVM source chain to be finalized and safe to relay. If omitted, the relayer uses the chain's native `finalized` block tag. If set, the relayer subtracts that many blocks from the latest block to determine finality.
+
+This value should match the finality assumption your attestor is configured with. If the configurations dont match the relayer may attempt to generate a proof for a height the attestors do not yet consider finalized.
+
+The demo sets this to `0` because Besu's single-validator QBFT produces instant finality. Both configs must match:
+
+```yaml config.yml
+chains:
+  besu:
+    # ...
+    ibcv2:
+      finality_offset: 0
+```
+
+This matches the `finality_offset` in the EVM `attestor-config.toml`:
+
+```toml 
+[adapter]
+finality_offset = 0
+```
+
+### counterparty_chains
+
+The `ibcv2.counterparty_chains` field maps client IDs on a chain to their counterparty chain IDs. The relayer only relays packets for connections listed here:
+
+```yaml
+chains:
+  cosmos:
+    ibcv2:
+      counterparty_chains:
+        attestations-0: "32382"   # client ID on cosmos-1 → besu chain ID
+  besu:
+    ibcv2:
+      finality_offset: 0
+      counterparty_chains:
+        client-0: "cosmos-1"      # client ID on besu → cosmos chain ID
+```
+
+## Next steps
+
+With the relayer and Proof API running, the next step is to [wire the connection](/ibc/next/cosmos-evm/tutorial/walkthrough/06-wire): registering each client as the counterparty of the other and linking the IFT token contracts on both chains.
