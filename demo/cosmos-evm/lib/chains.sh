@@ -210,7 +210,7 @@ clean() {
     "$IBC_DIR/forge/broadcast" \
     "$IBC_DIR/forge/release-bytecode" \
     "$IBC_DIR/forge/node_modules" \
-    "$IBC_DIR"/ibc-relayer-*
+    "$IBC_DIR"/ibc-relayer-* 2>/dev/null
 
   log "Clean done"
 }

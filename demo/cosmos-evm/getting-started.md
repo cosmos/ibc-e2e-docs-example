@@ -296,22 +296,22 @@ swap in a different artifact:
 | Variable | Purpose |
 |----------|---------|
 | `SOLIDITY_IBC_DIR` | Forge workspace path override (default: `ibc/forge/`) |
-| `SOLIDITY_RELEASE_TAG` | Pin a different solidity-ibc-eureka release for the prebuilt bytecode tarball (default: `solidity-v3.0.0-rc.1`) |
+| `SOLIDITY_RELEASE_TAG` | Pin a different solidity-ibc-eureka release for the prebuilt bytecode tarball (default: `solidity-v3.0.0`) |
 | `ICS26_ROUTER_ADDR` | Skip forge deploy (use a pre-deployed router) |
 | `EVM_ATTESTATION_LC_ADDR` | Skip AttestationLightClient deploy |
 | `DEPLOY_SCRIPT` | Forge deploy script (default: `scripts/MinimalDeploy.s.sol` inside `ibc/forge/`) |
 
 ```bash
 # Pin a specific solidity-ibc-eureka release for the prebuilt bytecode:
-SOLIDITY_RELEASE_TAG=solidity-v3.0.0-rc.1 ./setup.sh
+SOLIDITY_RELEASE_TAG=solidity-v3.0.0 ./setup.sh
 
 # Use a pre-deployed contract set (skips Phase 4A entirely):
 ICS26_ROUTER_ADDR=0x… ICS27_GMP_ADDR=0x… IFT_CONTRACT_ADDR=0x… ./setup.sh
 ```
 
-First run pulls ~14 docker images and downloads two GitHub tarballs
-(the `solidity-ibc-eureka` release-bytecode bundle and ibc-relayer
-migrations); subsequent runs are fully offline. Plan for ~5 GB of disk,
+First run pulls ~14 docker images and downloads one GitHub tarball
+(the `solidity-ibc-eureka` release-bytecode bundle); subsequent runs
+are fully offline. Plan for ~5 GB of disk,
 4 GB of RAM. Host needs `docker` (with the compose plugin), `jq`,
 `curl`, `openssl`, `perl`, and `bash`.
 

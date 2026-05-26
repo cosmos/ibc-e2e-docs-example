@@ -111,10 +111,10 @@ graph LR
 |---------|-------|-------|------|
 | `cosmos` | `ghcr.io/cosmos/sandbox:latest` | 26657 RPC · 1317 REST · 9090 gRPC | Cosmos chain node |
 | `besu` | `hyperledger/besu:26.2.0` | 8545 JSON-RPC · 8546 WS | Ethereum node — single-validator QBFT (no separate consensus layer) |
-| `relayer` | `ghcr.io/cosmos/ibc-relayer:v0.0.2` | 3000 gRPC API · 9100 metrics | Bidirectional IBC packet relay |
-| `attestor` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Besu — signs EVM state attestations for the attestations LC on Cosmos |
-| `attestor-cosmos` | `ghcr.io/cosmos/ibc-attestor:latest` | 9101 HTTP (int.) | Watches Cosmos — signs Cosmos state attestations for `AttestationLightClient` on EVM |
-| `proof-api` | `ghcr.io/cosmos/proof-api:latest` | 9090 gRPC (int.) | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
+| `relayer` | `ghcr.io/cosmos/ibc-relayer:v1.1.0` | 3000 gRPC API · 9100 metrics | Bidirectional IBC packet relay |
+| `attestor` | `ghcr.io/cosmos/ibc-attestor:v1.0.0` | 9101 HTTP (int.) | Watches Besu — signs EVM state attestations for the attestations LC on Cosmos |
+| `attestor-cosmos` | `ghcr.io/cosmos/ibc-attestor:v1.0.0` | 9101 HTTP (int.) | Watches Cosmos — signs Cosmos state attestations for `AttestationLightClient` on EVM |
+| `proof-api` | `ghcr.io/cosmos/proof-api:v0.8.0` | 9090 gRPC (int.) | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
 | `postgres` | postgres | 5432 (int.) | Relayer packet state persistence |
 
 ---
@@ -319,7 +319,7 @@ demo/cosmos-evm/
       node_modules/, out/, cache/, broadcast/ — forge / bun runtime (gitignored)
     state.env                 — persisted addresses + IDs, built up by state_set appends (gitignored)
     local/                    — rendered configs the services actually read (gitignored)
-    ibc-relayer-<tag>/        — downloaded relayer DB migrations (gitignored)
+    (relayer DB migrations are embedded in the relayer binary — no external download needed)
 ```
 
 Templates use bash `${VAR}` substitution; they're rendered via `render_template`
@@ -347,7 +347,7 @@ All work happens inside Docker, so the host only needs the tools `setup.sh` shel
 
 - **Disk:** ~5 GB free — most of it Docker images. The `bun install` node_modules tree under `ibc/forge/` is ~200 MB; the prebuilt release tarball that backs `MinimalDeploy.s.sol` is ~150 KB.
 - **Memory:** 4 GB is enough for the full stack idle; demos are light.
-- **Network:** first run pulls ~14 images and two GitHub tarballs (release-bytecode + ibc-relayer migrations); subsequent runs are fully offline if nothing's evicted.
+- **Network:** first run pulls ~14 images and one GitHub tarball (release-bytecode); subsequent runs are fully offline if nothing's evicted.
 
 ### Host ports
 
@@ -374,12 +374,12 @@ All tags pin to `${VAR:-default}` in `setup.sh` — override any variable to use
 | `hyperledger/besu:26.2.0` | `BESU_IMAGE` | Ethereum node — single-validator QBFT (no CL) |
 | `ghcr.io/foundry-rs/foundry:latest` | `FOUNDRY_IMAGE` | `forge script` deploy + `cast` calls |
 | `oven/bun:1` | `BUN_IMAGE` | `bun install` for OpenZeppelin + forge-std deps under `ibc/forge/` |
-| `ghcr.io/cosmos/ibc-relayer:v0.0.2` | `OPERATOR_IMAGE` | IBC packet relayer |
-| `ghcr.io/cosmos/ibc-attestor:latest` | `ATTESTOR_IMAGE` | EVM state attestor |
-| `ghcr.io/cosmos/proof-api:latest` | `PROOF_API_IMAGE` | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
+| `ghcr.io/cosmos/ibc-relayer:v1.1.0` | `OPERATOR_IMAGE` | IBC packet relayer |
+| `ghcr.io/cosmos/ibc-attestor:v1.0.0` | `ATTESTOR_IMAGE` | EVM state attestor |
+| `ghcr.io/cosmos/proof-api:v0.8.0` | `PROOF_API_IMAGE` | Aggregates attestor signatures into proofs the relayer fetches over gRPC |
 | `postgres:16` | (compose) | Relayer packet-state DB |
 | `fullstorydev/grpcurl:latest` | (helper) | gRPC calls to relayer + proof-api |
-| `migrate/migrate` | (helper) | Relayer DB migrations |
+| (relayer image) | `OPERATOR_IMAGE` | DB migrations via embedded `migrate` subcommand |
 | `busybox` | (helper) | `cp` across Docker volumes (cosmos image has no shell) |
 
 ### Downloaded from GitHub on first run
@@ -388,8 +388,8 @@ Each fetch is skipped if the corresponding skip-and-reuse variable (below) is se
 
 | Source | Default ref | Destination | Purpose |
 |--------|-------------|-------------|---------|
-| `cosmos/solidity-ibc-eureka` release tarball | `$SOLIDITY_RELEASE_TAG` (default `solidity-v3.0.0-rc.1`) | `ibc/forge/release-bytecode/` | Prebuilt contract bytecode JSONs — `ICS26Router`, `ICS27GMP`, `ICS27Account`, `IFTOwnable`, `AttestationLightClient`, `CosmosIFTSendCallConstructor` — loaded at deploy time via `vm.getCode`. No source-tree clone needed. |
-| `cosmos/ibc-relayer` archive | matches `OPERATOR_IMAGE` tag (`v0.0.2`) | `ibc/ibc-relayer-<tag>/` | SQL migration files for the relayer DB |
+| `cosmos/solidity-ibc-eureka` release tarball | `$SOLIDITY_RELEASE_TAG` (default `solidity-v3.0.0`) | `ibc/forge/release-bytecode/` | Prebuilt contract bytecode JSONs — `ICS26Router`, `ICS27GMP`, `ICS27Account`, `IFTOwnable`, `AttestationLightClient`, `CosmosIFTSendCallConstructor` — loaded at deploy time via `vm.getCode`. No source-tree clone needed. |
+| (none — migrations embedded in relayer binary) | — | — | Relayer runs `migrate` subcommand against postgres on startup |
 | `bun install` | from `ibc/forge/package.json` (`@openzeppelin/contracts@5.6.1` + `forge-std@v1.15.0`) | `ibc/forge/node_modules/` | OpenZeppelin + forge-std for compiling `MinimalDeploy.s.sol` |
 
 ### Skip-and-reuse knobs
@@ -412,7 +412,7 @@ Runtime state that survives between runs is persisted in `ibc/state.env`.
 
 - **Under `evm/`:** `key` (Besu QBFT validator private key)
 - **Under `cosmos/`:** `local/config/{genesis.json,app.toml,config.toml,client.toml,node_key.json,priv_validator_key.json,…}`, `local/ibc_client_state.json`, `local/ibc_consensus_state.json` — bind-mounted directly into the cosmos container
-- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `forge/{node_modules,out,cache,broadcast,release-bytecode}/`, `ibc-relayer-<tag>/`
+- **Under `ibc/`:** `state.env`, `local/{config.yml,keys.json,relayer.json,attestor-config.toml,attestor-cosmos-config.toml,.ibc-attestor/}`, `forge/{node_modules,out,cache,broadcast,release-bytecode}/`
 - **Under `logs/`:** `setup-YYYYMMDD-HHMMSS.log` (one per run)
 - **Docker volumes** (prefixed with project dir name): `cosmos-data` (chain state + keyring; config now on host), `besu-data`, `relayer-data`, `attestor-data`, `attestor-cosmos-data`, `postgres-data`
 
@@ -522,7 +522,7 @@ The table maps each internal phase to the `setup.sh` step command that runs it.
 | 4C | `setup_relayer_key` | `relayer` | Resolve relayer bech32 address; copy Cosmos keyring into relayer-data volume |
 | 4D | `generate_relayer_config` | `relayer` | Render `config.yml` + `keys.json` from templates. Both client IDs are in `state.env` at this point — `create-clients` always runs before `relayer` in both the full and step-by-step flows. |
 | 4D1 | `generate_proof_api_config` | `relayer` | Render `relayer.json` — must exist before `docker compose up relayer` to avoid compose creating a directory at the bind-mount path |
-| 4E0 | `_wait_for_postgres` + `run_db_migrations` | `relayer` | `docker compose up -d postgres`, poll `pg_isready`, then `migrate up` against the schema from `cosmos/ibc-relayer@<OPERATOR_IMAGE tag>` |
+| 4E0 | `_wait_for_postgres` + `run_db_migrations` | `relayer` | `docker compose up -d postgres`, poll `pg_isready`, then run the relayer's embedded `migrate` subcommand |
 | 4E | `start_relayer` | `relayer` | `docker compose up -d relayer` |
 | 4E2 | `start_proof_api` | `relayer` | `docker compose up -d proof-api` (attested mode in both directions) |
 | 4B5a | `reconcile_ibc_client_pair` | `create-clients` | Verify persisted `COSMOS_CLIENT_ID` ↔ `EVM_CLIENT_ID` still match on-chain; clear both on inconsistency so the next phase recreates them |

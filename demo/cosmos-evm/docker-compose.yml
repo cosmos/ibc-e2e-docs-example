@@ -80,7 +80,7 @@ services:
 
   # ── IBC Operator / Relayer ────────────────────────────────────────────────
   relayer:
-    image: ${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}
+    image: ${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v1.1.0}
     container_name: ibc-relayer
     command: [ "start" ]
     environment:
@@ -112,7 +112,7 @@ services:
   # client (attestations LC) on Cosmos. One process per chain — the binary takes a
   # singular --chain-type at startup, so a second service watches Cosmos.
   attestor:
-    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:v1.0.0}
     container_name: ibc-attestor
     command: [ "server", "--config", "/config/attestor-config.toml", "--chain-type", "evm", "--signer-type", "local" ]
     volumes:
@@ -133,7 +133,7 @@ services:
   # keystore with the EVM-watching attestor, so a single attestor address
   # is registered with both light clients.
   attestor-cosmos:
-    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}
+    image: ${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:v1.0.0}
     container_name: ibc-attestor-cosmos
     command: [ "server", "--config", "/config/attestor-cosmos-config.toml", "--chain-type", "cosmos", "--signer-type", "local" ]
     volumes:
@@ -151,10 +151,10 @@ services:
   # to fetch attestations for both directions. Configured in fully attested
   # mode
   proof-api:
-    image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}
+    image: ${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:v0.8.0}
     container_name: ibc-proof-api
     volumes:
-      - ./ibc/local/relayer.json:/usr/local/relayer/relayer.json:ro
+      - ./ibc/local/relayer.json:/usr/local/proof-api/proof-api.json:ro
     networks:
       - ibc-net
     depends_on:

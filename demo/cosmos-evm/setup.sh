@@ -60,9 +60,9 @@ export COSMOS_IMAGE="${COSMOS_IMAGE:-ghcr.io/cosmos/sandbox-ledger:latest}"
 export BESU_IMAGE="${BESU_IMAGE:-hyperledger/besu:26.2.0}"
 export FOUNDRY_IMAGE="${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:latest}"
 export BUN_IMAGE="${BUN_IMAGE:-oven/bun:1}"
-export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v0.0.2}"
-export ATTESTOR_IMAGE="${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:latest}"
-export PROOF_API_IMAGE="${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:latest}"
+export OPERATOR_IMAGE="${OPERATOR_IMAGE:-ghcr.io/cosmos/ibc-relayer:v1.1.0}"
+export ATTESTOR_IMAGE="${ATTESTOR_IMAGE:-ghcr.io/cosmos/ibc-attestor:v1.0.0}"
+export PROOF_API_IMAGE="${PROOF_API_IMAGE:-ghcr.io/cosmos/proof-api:v0.8.0}"
 
 # Cosmos (sandbox)
 COSMOS_CHAIN_ID="cosmos-1"
@@ -93,7 +93,7 @@ SOLIDITY_IBC_DIR="${SOLIDITY_IBC_DIR:-$IBC_DIR/forge}"
 # Release tag for the prebuilt contract bytecode bundle consumed by
 # scripts/MinimalDeploy.s.sol (loaded via vm.getCode from the unpacked
 # release-bytecode/ directory; see lib/ibc.sh::fetch_release_bytecode).
-SOLIDITY_RELEASE_TAG="${SOLIDITY_RELEASE_TAG:-solidity-v3.0.0-rc.1}"
+SOLIDITY_RELEASE_TAG="${SOLIDITY_RELEASE_TAG:-solidity-v3.0.0}"
 DEPLOY_SCRIPT="${DEPLOY_SCRIPT:-scripts/MinimalDeploy.s.sol}"
 ICS26_ROUTER_ADDR="${ICS26_ROUTER_ADDR:-}"
 # AttestationLightClient on EVM — replaces SP1ICS07Tendermint. Deployed by

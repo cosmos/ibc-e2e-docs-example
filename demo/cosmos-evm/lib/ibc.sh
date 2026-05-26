@@ -447,27 +447,15 @@ _wait_for_postgres() {
 }
 
 # ─── Phase 4E0 ───────────────────────────────────────────────────────────────
-# Fetch cosmos/ibc-relayer source at the OPERATOR_IMAGE tag (cached on disk),
-# run migrate/migrate up against the relayer DB.
+# Run the relayer's embedded DB migrations via its `migrate` subcommand.
 run_db_migrations() {
-  local relayer_tag="${OPERATOR_IMAGE##*:}"
-  local src_dir="$IBC_DIR/ibc-relayer-${relayer_tag}"
-  if [[ ! -d "$src_dir" ]]; then
-    local url="https://github.com/cosmos/ibc-relayer/archive/refs/tags/${relayer_tag}.tar.gz"
-    local tarball="$IBC_DIR/${relayer_tag}.tar.gz"
-    log "Fetching cosmos/ibc-relayer@${relayer_tag} source..."
-    curl -fsSL "$url" -o "$tarball" || die "Failed to download $url"
-    tar -xzf "$tarball" -C "$IBC_DIR"; rm -f "$tarball"
-    local extracted
-    extracted=$(find "$IBC_DIR" -maxdepth 1 -type d -name "ibc-relayer-*" | head -1)
-    [[ -d "$extracted" ]] || die "Extraction failed"
-    mv "$extracted" "$src_dir"
-  fi
   log "Running DB migrations..."
   docker run --rm --network "${COMPOSE_PROJECT}_ibc-net" \
-    -v "$src_dir/db/migrations":/migrations \
-    migrate/migrate -path /migrations \
-      -database "postgres://relayer:relayer@postgres:5432/relayer?sslmode=disable" up
+    -v "$IBC_DIR":/home/nonroot/config:ro \
+    -e POSTGRES_USER=relayer \
+    -e POSTGRES_PASSWORD=relayer \
+    "$OPERATOR_IMAGE" \
+    migrate --config /home/nonroot/config/local/config.yml
   log "DB migrations complete"
 }
 
