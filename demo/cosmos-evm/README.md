@@ -389,7 +389,6 @@ Each fetch is skipped if the corresponding skip-and-reuse variable (below) is se
 | Source | Default ref | Destination | Purpose |
 |--------|-------------|-------------|---------|
 | `cosmos/solidity-ibc-eureka` release tarball | `$SOLIDITY_RELEASE_TAG` (default `solidity-v3.0.0`) | `ibc/forge/release-bytecode/` | Prebuilt contract bytecode JSONs — `ICS26Router`, `ICS27GMP`, `ICS27Account`, `IFTOwnable`, `AttestationLightClient`, `CosmosIFTSendCallConstructor` — loaded at deploy time via `vm.getCode`. No source-tree clone needed. |
-| (none — migrations embedded in relayer binary) | — | — | Relayer runs `migrate` subcommand against postgres on startup |
 | `bun install` | from `ibc/forge/package.json` (`@openzeppelin/contracts@5.6.1` + `forge-std@v1.15.0`) | `ibc/forge/node_modules/` | OpenZeppelin + forge-std for compiling `MinimalDeploy.s.sol` |
 
 ### Skip-and-reuse knobs
