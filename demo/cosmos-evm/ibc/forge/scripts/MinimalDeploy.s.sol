@@ -8,7 +8,7 @@ pragma solidity ^0.8.28;
 // Eureka contracts (ICS26Router, ICS27GMP, ICS27Account, IFTOwnable) are
 // loaded from the prebuilt release bundle published at:
 //   https://github.com/cosmos/solidity-ibc-eureka/releases/download/
-//     solidity-v3.0.0-rc.1/solidity-contracts-solidity-v3.0.0-rc.1.tar.gz
+//     solidity-v3.0.0/solidity-contracts-solidity-v3.0.0.tar.gz
 // lib/ibc.sh::fetch_release_bytecode extracts the archive's `bytecode/`
 // directory to `$SOLIDITY_IBC_DIR/release-bytecode/`; `vm.getCode` reads
 // each JSON artifact and we deploy the raw runtime via the CREATE opcode.
