@@ -1,9 +1,6 @@
-# Step 6: Wire the Connection
+# Step 4: Wire the IFT Bridge
 
-After the previous step, both chains have a light client for the counterparty, but nothing yet connects them. This step:
-
-1. Links the two clients: registers each client's counterparty on-chain so the IBC module knows which client to use when sending packets.
-2. Wires the IFT applications: tells each chain's IFT module/contract which addresses and denoms correspond across chains, and what to mint or burn when a packet arrives.
+After the previous step, both light clients exist and their counterparties are registered. This step wires the IFT application layer: it tells each chain's IFT module and contract which addresses and denoms correspond across chains, and what to mint or burn when a packet arrives.
 
 Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
 
@@ -13,15 +10,7 @@ Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/c
 
 ## What the script does
 
-### 1. Register the counterparty client
-
-The Cosmos chain needs an on-chain record that its attestation client's counterparty is the EVM client. The script submits:
-
-```bash
-cosmos tx ibc client add-counterparty $COSMOS_CLIENT_ID $EVM_CLIENT_ID ""
-```
-
-### 2. Register the IFT bridge (Cosmos side)
+### 1. Register the IFT bridge (Cosmos side)
 
 Two transactions are submitted on the Cosmos chain.
 
@@ -43,7 +32,7 @@ This tells the Cosmos IFT module: EVM packets verified by `COSMOS_CLIENT_ID` (th
 
 Output: `COSMOS_IFT_DENOM` in the format `factory/{creator_addr}/{subdenom}`.
 
-### 3. Register the IFT bridge (EVM side)
+### 2. Register the IFT bridge (EVM side)
 
 The EVM side requires a constructor contract and a bridge registration on the IFT contract.
 
@@ -77,15 +66,7 @@ IFTAccessManaged.registerIFTBridge(
 
 ## Applying to your own setup
 
-### Counterparty registration
-
-`add-counterparty` only needs to be run once per client pair. If you recreate a client (for example, after a chain reset), you must re-register the counterparty.
-
-{/* dennis serdar todo: In production, should add-counterparty be submitted as a governance proposal rather than a direct admin tx? 
-
-also, how is the IFT bridge registered in production?
-
-*/}
+{/* dennis serdar todo: how is the IFT bridge registered in production? */}
 
 ### GMP account address
 
@@ -93,4 +74,4 @@ The GMP account address is deterministically derived from `(client_id, contract_
 
 ## Next steps
 
-With the bridge wired, the [next step](07-ransfer.md) sends a live token transfer and validates the full packet relay flow.
+With the IFT bridge registered, the next step is to [configure and start the attestors](/ibc/next/cosmos-evm/tutorial/walkthrough/05-attestors).

@@ -1,6 +1,6 @@
-# Step 4: Create Attestation Light Clients
+# Step 3: Create Attestation Light Clients
 
-This step creates an attestation light client on each chain. Each client is initialized with the attestor address and an initial trusted height and timestamp from the counterparty chain. Once both clients exist, the two chains can verify each other's packets.
+This step creates an attestation light client on each chain and registers each client's counterparty. Each client is initialized with the attestor address and an initial trusted height and timestamp from the counterparty chain. Once both clients exist and their counterparties are registered, the two chains can verify each other's packets.
 
 Run the following:
 
@@ -27,13 +27,15 @@ Each client is initialized with a list of attestor Ethereum addresses and a quor
 
 ## What the script does
 
-### 1. Read the attestor address
+### 1. Generate or read the attestor keystore
 
-Both light clients are initialized with the attestor's Ethereum address. The script reads it from the keystore by running the attestor binary via `docker run`:
+Both light clients are initialized with the attestor's Ethereum address. The script first ensures the keystore exists — generating a new one if not — then reads the address from it via `docker run`:
 
 ```bash
 ibc_attestor key show
 ```
+
+The keystore is written to `ibc/local/.ibc-attestor/ibc-attestor-keystore` and reused by the attestor services started in a later step.
 
 <Note>
   Ethereum addresses configured in the light client must be in EIP-55 checksummed format.
@@ -88,14 +90,29 @@ The script initializes it with:
 - The attestor's Ethereum address
 - The current Cosmos block height and timestamp as the initial trusted state
 
-After deployment, the contract is registered with the `ICS26Router` on the EVM chain, associating the light client contract with the Cosmos counterparty:
+After deployment, the contract is registered with the `ICS26Router` on the EVM chain. The `CounterpartyInfo` passed to `addClient` includes the Cosmos client ID, so the EVM client knows its counterparty at registration time:
 
 ```
-ICS26Router.addClient((clientId, []), lcAddress)
+ICS26Router.addClient((COSMOS_CLIENT_ID, [0x]), lcAddress)
 ```
 
-Here `clientId` is the Cosmos counterparty client ID (`COSMOS_CLIENT_ID`) created in the previous step. The EVM client ID (`EVM_CLIENT_ID`, in the format `client-N`) is assigned by the router on registration.
+The EVM client ID (`EVM_CLIENT_ID`, in the format `client-N`) is assigned by the router on registration.
 
+Output: `EVM_CLIENT_ID` in the format `client-N`.
+
+### 4. Register the Cosmos-side counterparty
+
+With both client IDs now known, the script registers the Cosmos-side counterparty — the on-chain record that maps the Cosmos attestation client to its EVM peer:
+
+```bash
+sandboxd tx ibc client add-counterparty $COSMOS_CLIENT_ID $EVM_CLIENT_ID ""
+```
+
+This call is idempotent: if the counterparty is already registered with the correct EVM client ID, the script skips it.
+
+<Note>
+  The EVM client registers its counterparty at `addClient` time (the Cosmos client ID is passed in the `CounterpartyInfo`). The Cosmos client registers its counterparty here, immediately after the EVM client ID is known.
+</Note>
 
 ## Configuration reference
 
@@ -148,4 +165,4 @@ The demo passes `address(0)` as the `roleManager`, which allows anyone to submit
 
 ## Next steps
 
-With both light clients created and their IDs written to state, the next step is to [configure and start the relayer and Proof API](/ibc/next/cosmos-evm/tutorial/walkthrough/05-relayer). 
+With both light clients created, counterparties registered, and their IDs written to state, the next step is to [register the IFT bridges](/ibc/next/cosmos-evm/tutorial/walkthrough/04-wire).
