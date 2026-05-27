@@ -1,6 +1,6 @@
 # ibc-e2e-docs-example
 
-End-to-end demos for IBC v2 token transfers between Cosmos chains and EVM networks using attestation-based light clients and the IFT (Interchain Fungible Token) protocol.
+This repo contains end-to-end demos for IBC v2 token transfers between Cosmos chains and EVM networks using attestation-based light clients and the IFT (Interchain Fungible Token) protocol.
 
 ## Demos
 
