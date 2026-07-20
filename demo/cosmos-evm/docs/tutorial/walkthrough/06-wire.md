@@ -1,0 +1,97 @@
+# Step 6: Wire the Connection
+
+After the previous step, both chains have a light client for the counterparty, but nothing yet connects them. This step does three things:
+
+1. Links the two clients: registers each client's counterparty on-chain so the IBC module knows which client to use when sending packets.
+2. Wires the IFT applications: tells each chain's IFT module/contract which addresses and denoms correspond across chains, and what to mint or burn when a packet arrives.
+3. Tells the relayer which connections to watch: updates the relayer config with the client IDs it should relay for.
+
+Run [`setup.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/setup.sh):
+
+```bash
+./setup.sh wire
+```
+
+## What the script does
+
+### 1. Register the counterparty client
+
+The Cosmos chain needs an on-chain record that its attestation client's counterparty is the EVM client. The script submits:
+
+```bash
+cosmos tx ibc client add-counterparty $COSMOS_CLIENT_ID $EVM_CLIENT_ID ""
+```
+
+The IBC module uses this record to route outgoing packets to the correct client when sending to the EVM chain.
+
+### 2. Register the IFT bridge (Cosmos side)
+
+Two transactions are submitted on the Cosmos chain.
+
+First, if the tokenfactory denom does not yet exist, it is created:
+
+```bash
+cosmos tx tokenfactory create-denom $subdenom
+```
+
+The denom takes the form `factory/{creator_addr}/{subdenom}`.
+
+Then the IFT bridge is registered:
+
+```bash
+cosmos tx ift register-bridge $COSMOS_IFT_DENOM $COSMOS_CLIENT_ID $IFT_CONTRACT_ADDR evm
+```
+
+This tells the Cosmos IFT module: EVM packets verified by `COSMOS_CLIENT_ID` (the attestation light client on Cosmos) that originate from `$IFT_CONTRACT_ADDR` should mint `$COSMOS_IFT_DENOM`. When tokens are sent in the other direction, the module burns them and sends a packet to that contract.
+
+Output: `COSMOS_IFT_DENOM` in the format `factory/{creator_addr}/{subdenom}`.
+
+### 3. Register the IFT bridge (EVM side)
+
+The EVM side requires a constructor contract and a bridge registration on the IFT contract.
+
+1. Compute the GMP account address
+
+The GMP module derives a Cosmos account deterministically from the source client ID, the sender contract address, and a salt. This is the account that the GMP module uses to submit the embedded `MsgIFTMint` on Cosmos when a packet arrives from the EVM:
+
+```bash
+sandboxd query gmp get-address $COSMOS_CLIENT_ID $IFT_CONTRACT_ADDR ""
+```
+
+This address is baked into the `CosmosIFTSendCallConstructor` at deploy time.
+
+2. Deploy [`CosmosIFTSendCallConstructor`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/utils/CosmosIFTSendCallConstructor.sol)
+
+This contract encodes the `MsgIFTMint` message for EVM-to-Cosmos transfers. It is initialized with:
+
+- `bridgeReceiveTypeUrl`: `/ibc.applications.prototypes.ift.v1.MsgIFTMint`
+- `denom`: `COSMOS_IFT_DENOM`
+- `icaAddress`: the GMP account address computed above
+
+3. Register the bridge on the IFT contract
+
+```
+IFTAccessManaged.registerIFTBridge(
+  clientId,                  // EVM_CLIENT_ID
+  counterpartyIFTAddress,    // COSMOS_IFT_MODULE
+  iftSendCallConstructor     // CTOR_ADDR
+)
+```
+
+### 4. Finalize the relayer config
+
+The [relayer config template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/relayer-config.yml.tmpl) uses a `counterparty_chains` placeholder that is set to an empty dict when client IDs are not yet known. Now that both IDs are known, the script re-renders the config with the mappings filled in and restarts the relayer. The relayer only relays packets for client IDs listed in `counterparty_chains`.
+
+## Applying to your own setup
+
+### Counterparty registration
+
+`add-counterparty` only needs to be run once per client pair. If you recreate a client (for example, after a chain reset), you must re-register the counterparty.
+
+### GMP account address
+
+The GMP account address is deterministically derived from `(client_id, contract_addr, salt)`. If the client ID or IFT contract address changes, the GMP account address changes and `CosmosIFTSendCallConstructor` must be redeployed and re-registered.
+
+## Next steps
+
+With the bridge wired, the [next step](07-ransfer.md) sends a live token transfer and validates the full packet relay flow.

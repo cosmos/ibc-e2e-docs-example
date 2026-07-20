@@ -1,0 +1,164 @@
+# Step 5: Create Attestation Light Clients
+
+This step creates an attestation light client on each chain. Each client is initialized with the attestor address and an initial trusted height and timestamp from the counterparty chain. Once both clients exist, the two chains can verify each other's packets.
+
+Run the following:
+
+```bash
+./setup.sh create-clients
+```
+
+The logic for this command is in [`lib/ibc.sh`](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/lib/ibc.sh)
+
+## Attestation light client
+
+An attestation light client verifies IBC packets using ECDSA signatures from a registered set of off-chain attestors. There are two implementations: [Go (cosmos/ibc-go)](https://github.com/cosmos/ibc-go/tree/main/modules/light-clients/attestations) for the Cosmos side and [Solidity (cosmos/solidity-ibc-eureka)](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol) for the EVM side.
+
+Each client is initialized with a list of attestor Ethereum addresses and a quorum threshold. When a packet arrives with an attestation proof, the light client:
+
+1. Validates that the proof value is non-empty and the path has exactly one element.
+2. Looks up the trusted consensus timestamp stored at `proofHeight`.
+3. Decodes the proof into `attestationData` and `signatures`.
+4. Checks that `signatures.length >= minRequiredSigs`.
+5. Recomputes the expected digest: `sha256(0x02 || sha256(attested_data))`.
+6. For each signature: recovers the signer address via ECDSA, checks it against the registered attestor set, and rejects duplicates.
+7. Decodes `attestationData` as a `PacketAttestation` and verifies the attested height matches `proofHeight`.
+8. Checks that the packet commitment is present in the attested packets array.
+
+## What the script does
+
+### 1. Read the attestor address
+
+Both light clients are initialized with the attestor's Ethereum address. The script reads it from the keystore:
+
+```bash
+ibc_attestor key show
+```
+
+### 2. Create the Cosmos-side client
+
+The Cosmos-side client verifies EVM packets on the Cosmos chain. It is initialized with:
+
+- The attestor's Ethereum address
+- The current EVM block height and timestamp as the initial trusted state
+
+The script renders two JSON files from templates and submits them:
+
+```bash
+tx ibc client create client-state.json consensus-state.json
+```
+
+The client state holds the client's configuration: which attestor addresses are trusted, the quorum threshold, the latest known height, and whether the client is frozen:
+
+- `client-state.json` ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/client-state.json.tmpl)):
+
+```json
+{
+  "@type": "/ibc.lightclients.attestations.v1.ClientState",
+  "attestor_addresses": ["<ATTESTOR_ETH_ADDR>"],
+  "min_required_sigs": 1,
+  "latest_height": <EVM_BLOCK_HEIGHT>,
+  "is_frozen": false
+}
+```
+
+The consensus state records the block timestamp at the initial trusted height, which anchors proof verification:
+
+- `consensus-state.json` ([template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/consensus-state.json.tmpl)):
+
+```json
+{
+  "@type": "/ibc.lightclients.attestations.v1.ConsensusState",
+  "timestamp": "<EVM_BLOCK_TIMESTAMP_NANOSECONDS>"
+}
+```
+
+Output: `COSMOS_CLIENT_ID` in the format `attestations-N`.
+
+### 3. Create the EVM-side client
+
+The EVM-side client verifies Cosmos packets on the EVM chain. It is a Solidity contract ([`AttestationLightClient`](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol)) deployed from prebuilt bytecode and registered with the `ICS26Router`.
+
+The script initializes it with:
+
+- The attestor's Ethereum address
+- The current Cosmos block height and timestamp as the initial trusted state
+
+After deployment, the contract is registered with the `ICS26Router` on the EVM chain:
+
+```
+ICS26Router.addClient((clientId, []), lcAddress)
+```
+
+The client ID is predicted before deployment from `ICS26Router.getNextClientSeq()`.
+
+Output: `EVM_CLIENT_ID` in the format `client-N`.
+
+### 4. Restart the Proof API
+
+After both clients are registered, the script restarts the Proof API:
+
+```bash
+docker compose restart proof-api
+```
+
+## Configuration reference
+
+### Cosmos client state 
+
+- ([Client state template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/client-state.json.tmpl))
+
+| Field | Description |
+| --- | --- |
+| `attestor_addresses` | List of registered attestor Ethereum addresses |
+| `min_required_sigs` | Quorum threshold — minimum signatures required to accept a proof |
+| `latest_height` | EVM block height at time of client creation (initial trusted state) |
+| `is_frozen` | If `true`, the client rejects all proofs — used as an emergency stop |
+
+### Cosmos consensus state 
+
+- ([Consensus state template](https://github.com/cosmos/ibc-e2e-docs-example/blob/main/demo/cosmos-evm/ibc/consensus-state.json.tmpl))
+
+| Field | Description |
+| --- | --- |
+| `timestamp` | EVM block timestamp at `latest_height`, in nanoseconds |
+
+### EVM client constructor 
+
+- ([AttestationLightClient.sol](https://github.com/cosmos/solidity-ibc-eureka/blob/main/contracts/light-clients/attestation/AttestationLightClient.sol))
+
+| Argument | Description |
+| --- | --- |
+| `attestorAddresses` | List of registered attestor Ethereum addresses |
+| `minRequiredSigs` | Minimum signatures required to accept a proof |
+| `initialHeight` | Cosmos block height at time of deployment (initial trusted state) |
+| `initialTimestampSeconds` | Cosmos block timestamp at `initialHeight`, in Unix seconds |
+| `roleManager` | Address that administers roles and is allowed to submit proofs. Use `address(0)` to allow anyone to submit proofs (demo only) |
+
+## Applying this to your own setup
+
+### Initial trusted state
+
+The initial height and timestamp anchor the light client to a specific point in the counterparty chain's history. The client will only accept attestations for heights at or after this point.
+
+### Quorum threshold
+
+The demo uses `min_required_sigs: 1` because there is a single attestor. For production, set this to the threshold of your attestor set.
+
+### Attestor key rotation
+
+The attestor addresses are registered at client creation time. If you rotate the attestor key, you must update both light clients on-chain: the Cosmos client via a governance or admin transaction, and the EVM client by calling the appropriate method on `AttestationLightClient`. Until both are updated, packet verification will fail for the new key.
+
+### `roleManager` in production
+
+The demo passes `address(0)` as the `roleManager`, which allows anyone to submit proofs. You can also pass the address of an `AccessControl`-compatible admin to control who can submit proofs, freeze the client, rotate the attestor set, or update the quorum threshold.
+
+### `is_frozen`
+
+Setting `is_frozen: true` on the Cosmos client (or calling the equivalent on the EVM contract) halts packet verification immediately. This is an emergency mechanism; no packets can be relayed while the client is frozen.
+
+## Next steps
+
+<!-- todo: add link -->
+
+With both light clients created, the next step wires the connection: registering each client as the counterparty of the other and linking the IFT token contracts on both chains.
